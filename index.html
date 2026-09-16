@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#b65332" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌾</text></svg>">
+  <title>Bek kulchalari va nonlari — Boshqaruv Tizimi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,500;0,9..40,700;1,9..40,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- MOBIL OVERLAY -->
+<div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-mark"><i class="fa-solid fa-wheat-awn"></i></div>
+      <h1>Bek kulchalari va nonlari</h1>
+      <p>Nonvoyxonalar boshqaruv tizimi</p>
+    </div>
+    <form id="login-form">
+      <label>Login
+        <input 
+          type="text" 
+          id="login-username" 
+          autocomplete="username" 
+          placeholder="Loginni kiriting" 
+          required 
+          pattern="[A-Za-z0-9_]{3,30}"
+          title="Login kamida 3 ta harf, raqam yoki pastki chiziqdan iborat bo'lishi kerak"
+        />
+      </label>
+      <label>Parol
+        <div class="password-input-wrap">
+          <input 
+            type="password" 
+            id="login-password" 
+            autocomplete="current-password" 
+            placeholder="Parolni kiriting" 
+            required 
+            minlength="4"
+            title="Parol kamida 4 ta belgidan iborat bo'lishi kerak"
+          />
+          <button type="button" id="password-toggle" class="password-toggle-btn" title="Parolni ko'rsatish/yashirish" aria-label="Parolni ko'rsatish"><i class="fa-regular fa-eye"></i></button>
+        </div>
+      </label>
+      <div id="login-error" class="form-error hidden" role="alert"></div>
+      <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">Kirish</button>
+    </form>
+    <div class="login-hint">
+      <strong>Demo hisoblar:</strong>
+      <div><code>admin / admin123</code> — Super Admin</div>
+      <div><code>nonvoy1 / nonvoy123</code> — Nonvoyxona Admini</div>
+      <div><code>dokon1 / dokon123</code> — Do'kon</div>
+    </div>
+  </div>
+</div>
+
+<!-- APP SHELL -->
+<div id="app-shell" class="app-shell hidden" style="display:none;">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark"><i class="fa-solid fa-wheat-awn"></i></span>
+      <span class="brand-name">Bek kulchalari</span>
+    </div>
+    <nav class="sidebar-nav" id="nav-links"></nav>
+    <div class="sidebar-footer">
+      <button id="theme-toggle" class="theme-toggle" title="Mavzuni almashtirish">
+        <span id="theme-icon"><i class="fa-solid fa-moon"></i></span> <span id="theme-label">Tungi rejim</span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button id="sidebar-burger" class="burger" aria-label="Menyu"><i class="fa-solid fa-bars"></i></button>
+        <div class="topbar-title" id="page-title">Boshqaruv paneli</div>
+      </div>
+      <div class="topbar-right">
+        <div class="business-switcher" id="business-switcher"></div>
+        <div class="user-chip" id="user-chip"></div>
+        <button id="logout-btn" class="btn btn-ghost btn-sm" title="Tizimdan chiqish"><i class="fa-solid fa-arrow-right-from-bracket"></i> Chiqish</button>
+      </div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+
+<script src="js/api.js"></script>
+<script src="js/views.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
