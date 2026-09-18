@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#cf613c"/>
+      <stop offset="100%" stop-color="#993d20"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd56b"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Background with subtle rounded shape for app icon -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Outer subtle circular border -->
+  <circle cx="256" cy="256" r="210" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="4"/>
+  <circle cx="256" cy="256" r="185" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2" stroke-dasharray="6,6"/>
+
+  <!-- Bakery emblem group -->
+  <g filter="url(#shadow)">
+    <!-- Bread loaf base -->
+    <ellipse cx="256" cy="330" rx="140" ry="70" fill="url(#goldGrad)"/>
+    
+    <!-- Bread score cuts -->
+    <path d="M190 310 Q210 290 230 325" fill="none" stroke="#b45309" stroke-width="6" stroke-linecap="round"/>
+    <path d="M240 300 Q260 280 280 320" fill="none" stroke="#b45309" stroke-width="6" stroke-linecap="round"/>
+    <path d="M290 310 Q310 290 330 325" fill="none" stroke="#b45309" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- Wheat stalks -->
+    <!-- Center stalk -->
+    <path d="M256 120 L256 260" stroke="#fef3c7" stroke-width="6" stroke-linecap="round"/>
+    <!-- Wheat grains -->
+    <path d="M256 140 Q230 130 236 155 Q246 160 256 150" fill="#fef3c7"/>
+    <path d="M256 140 Q282 130 276 155 Q266 160 256 150" fill="#fef3c7"/>
+    
+    <path d="M256 165 Q225 155 232 180 Q243 185 256 175" fill="#fef3c7"/>
+    <path d="M256 165 Q287 155 280 180 Q269 185 256 175" fill="#fef3c7"/>
+
+    <path d="M256 190 Q225 180 232 205 Q243 210 256 200" fill="#fef3c7"/>
+    <path d="M256 190 Q287 180 280 205 Q269 210 256 200" fill="#fef3c7"/>
+
+    <path d="M256 215 Q230 205 236 230 Q246 235 256 225" fill="#fef3c7"/>
+    <path d="M256 215 Q282 205 276 230 Q266 235 256 225" fill="#fef3c7"/>
+
+    <!-- Left curved stalk -->
+    <path d="M195 180 Q220 230 250 270" stroke="#fde68a" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <path d="M195 180 Q180 165 190 195 Z" fill="#fde68a"/>
+    <path d="M205 195 Q190 185 202 210 Z" fill="#fde68a"/>
+    <path d="M218 215 Q205 205 216 230 Z" fill="#fde68a"/>
+
+    <!-- Right curved stalk -->
+    <path d="M317 180 Q292 230 262 270" stroke="#fde68a" stroke-width="5" stroke-linecap="round" fill="none"/>
+    <path d="M317 180 Q332 165 322 195 Z" fill="#fde68a"/>
+    <path d="M307 195 Q322 185 310 210 Z" fill="#fde68a"/>
+    <path d="M294 215 Q307 205 296 230 Z" fill="#fde68a"/>
+  </g>
+
+  <!-- Bottom title text -->
+  <text x="256" y="440" text-anchor="middle" fill="#ffffff" font-family="'Segoe UI', Roboto, sans-serif" font-size="34" font-weight="700" letter-spacing="2">BEK NONLARI</text>
+</svg>

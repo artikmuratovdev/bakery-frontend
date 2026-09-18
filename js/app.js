@@ -61,8 +61,108 @@ function toggleSidebar() {
 }
 
 /* ===================== Auth / Bootstrap ===================== */
+let revalidateTimer = null;
+function initCacheSubscriber() {
+  ApiCache.subscribe((changedUrl) => {
+    if (!state.user) return;
+    if (revalidateTimer) clearTimeout(revalidateTimer);
+    revalidateTimer = setTimeout(() => {
+      // Faqat foydalanuvchi tizimda bo'lsa va joriy sahifaga daxldor bo'lsa yangilaymiz
+      render(true);
+    }, 100);
+  });
+}
+
+function initSyncIndicator() {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+
+  let hideTimer = null;
+
+  ApiCache.onSyncStatus((status) => {
+    if (hideTimer) clearTimeout(hideTimer);
+
+    if (!navigator.onLine || status === 'offline') {
+      el.className = 'sync-status-pill offline';
+      el.innerHTML = '<i class="fa-solid fa-cloud-slash"></i><span class="sync-text">Oflayn rejim</span>';
+      el.title = "Internet bilan aloqa yo'q. Oxirgi keshdagi ma'lumotlar ko'rsatilmoqda.";
+      el.classList.remove('hidden');
+      return;
+    }
+
+    if (status === 'syncing') {
+      el.className = 'sync-status-pill syncing';
+      el.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i><span class="sync-text">Yangilanmoqda...</span>';
+      el.title = "Serverdan so'nggi ma'lumotlar tekshirilmoqda...";
+      el.classList.remove('hidden');
+      return;
+    }
+
+    if (status === 'updated') {
+      el.className = 'sync-status-pill updated';
+      el.innerHTML = '<i class="fa-solid fa-circle-check"></i><span class="sync-text">Yangilandi</span>';
+      el.title = "Ma'lumotlar muvaffaqiyatli yangilandi.";
+      el.classList.remove('hidden');
+
+      hideTimer = setTimeout(() => {
+        el.classList.add('hidden');
+      }, 2500);
+      return;
+    }
+
+    // idle
+    el.classList.add('hidden');
+  });
+
+  el.addEventListener('click', () => {
+    if (state.user) {
+      render(true);
+      toast("Ma'lumotlar qayta yuklanmoqda...", 'info');
+    }
+  });
+}
+
+function hasCachedDataForRoute(route) {
+  const [, view, param] = (route || '#/dashboard').split('/');
+  const bizId = state.user?.role === 'super_admin' ? state.currentBusinessId : state.user?.business_id;
+
+  if (view === 'dashboard' || !view) {
+    if (state.user?.role === 'store') {
+      return ApiCache.has(`/stores/${state.user.store_id}/history`);
+    }
+    return ApiCache.has('/dashboard/summary' + qs({ business_id: bizId }));
+  }
+  if (view === 'businesses') return ApiCache.has('/businesses');
+  if (view === 'products') return ApiCache.has('/products' + qs({ business_id: bizId }));
+  if (view === 'stores') {
+    if (param) return ApiCache.has(`/stores/${param}/history`);
+    return ApiCache.has('/stores' + qs({ business_id: bizId }));
+  }
+  if (view === 'production') return ApiCache.hasMatch('/production');
+  if (view === 'distribution') return ApiCache.hasMatch('/distribution');
+  if (view === 'payments') return ApiCache.hasMatch('/payments') || ApiCache.hasMatch('/stores');
+  if (view === 'reports') return ApiCache.hasMatch('/reports');
+  if (view === 'users') return ApiCache.has('/users');
+  return false;
+}
+
 async function boot() {
   initTheme();
+  initSyncIndicator();
+  initCacheSubscriber();
+
+  // Tarmoq holati hodisalari
+  window.addEventListener('online', () => {
+    toast("Internet aloqasi tiklandi. Ma'lumotlar yangilanmoqda...", 'success');
+    if (state.user) {
+      render(true);
+    }
+  });
+
+  window.addEventListener('offline', () => {
+    toast("Internet bilan aloqa uzildi. Keshdagi ma'lumotlar ko'rsatiladi.", 'warning');
+    ApiCache.setSyncStatus('offline');
+  });
 
   // Login event
   const loginForm = document.getElementById('login-form');
@@ -165,6 +265,7 @@ async function onLogout() {
     await API.post('/auth/logout');
   } catch (e) { /* ignore */ }
   API.removeToken();
+  ApiCache.clear();
   state.user = null;
   location.hash = '#/dashboard';
   showLogin();
@@ -293,14 +394,19 @@ function setActiveNav() {
 }
 
 /* ===================== Router ===================== */
-async function render() {
+async function render(isRevalidating = false) {
   setActiveNav();
   const content = document.getElementById('content');
   if (!content) return;
-  content.innerHTML = `<div style="padding: 40px 0; text-align: center; color: var(--color-text-muted);">
-    <div style="font-size: 28px; margin-bottom: 12px; color: var(--color-primary);"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
-    <div>Ma'lumotlar yuklanmoqda...</div>
-  </div>`;
+
+  // Agar kesh mavjud bo'lsa yoki orqa fonda yangilanish bo'lsa, yuklanish spinnere ko'rsatilmaydi
+  const hasCache = hasCachedDataForRoute(state.route);
+  if (!isRevalidating && !hasCache) {
+    content.innerHTML = `<div style="padding: 40px 0; text-align: center; color: var(--color-text-muted);">
+      <div style="font-size: 28px; margin-bottom: 12px; color: var(--color-primary);"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
+      <div>Ma'lumotlar yuklanmoqda...</div>
+    </div>`;
+  }
 
   const [, view, param] = state.route.split('/');
 
@@ -332,7 +438,11 @@ async function render() {
     else if (view === 'users') await renderUsers(content);
     else content.innerHTML = `<div class="card card-body">Bunday sahifa topilmadi.</div>`;
   } catch (e) {
-    content.innerHTML = `<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(e.message || 'Xatolik yuz berdi')}</div>`;
+    if (!isRevalidating) {
+      content.innerHTML = `<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(e.message || 'Xatolik yuz berdi')}</div>`;
+    } else {
+      console.warn('[Revalidate] Sahifani yangilashda xatolik:', e);
+    }
   }
 }
 

@@ -4,7 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#b65332" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌾</text></svg>">
+  <meta name="description" content="Bek kulchalari va nonlari — Nonvoyxonalar va do'konlar tarmog'i boshqaruv tizimi" />
+  
+  <!-- PWA & Mobile Capabilities -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="application-name" content="Bek Nonlari" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Bek Nonlari" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  
   <title>Bek kulchalari va nonlari — Boshqaruv Tizimi</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -60,6 +72,9 @@
       <div><code>nonvoy1 / nonvoy123</code> — Nonvoyxona Admini</div>
       <div><code>dokon1 / dokon123</code> — Do'kon</div>
     </div>
+    <div class="login-pwa-wrap" style="margin-top: 14px;">
+      <button type="button" id="login-pwa-install-btn" class="btn btn-outline btn-block btn-sm hidden" style="border-style: dashed;"><i class="fa-solid fa-mobile-screen-button"></i> Ilovani telefonga o'rnatish (APK)</button>
+    </div>
   </div>
 </div>
 
@@ -85,6 +100,8 @@
         <div class="topbar-title" id="page-title">Boshqaruv paneli</div>
       </div>
       <div class="topbar-right">
+        <div id="sync-status" class="sync-status-pill hidden" title="Ma'lumotlar holati"></div>
+        <button id="pwa-install-btn" class="pwa-install-btn-top hidden" title="Ilovani o'rnatish"><i class="fa-solid fa-cloud-arrow-down"></i> O'rnatish</button>
         <div class="business-switcher" id="business-switcher"></div>
         <div class="user-chip" id="user-chip"></div>
         <button id="logout-btn" class="btn btn-ghost btn-sm" title="Tizimdan chiqish"><i class="fa-solid fa-arrow-right-from-bracket"></i> Chiqish</button>
@@ -96,6 +113,22 @@
 
 <div id="toast-container" class="toast-container"></div>
 
+<!-- PWA O'RNATISH BANNERI -->
+<div id="pwa-install-banner" class="pwa-install-banner hidden" role="dialog" aria-label="Ilovani o'rnatish">
+  <div class="pwa-install-content">
+    <img src="icons/icon-192.png" alt="Bek Nonlari Logo" class="pwa-install-icon" />
+    <div class="pwa-install-text">
+      <strong>Bek Nonlari ilovasi</strong>
+      <p>Ilovani telefoningizga o'rnating</p>
+    </div>
+  </div>
+  <div class="pwa-install-actions">
+    <button id="pwa-install-action" class="btn btn-primary btn-sm"><i class="fa-solid fa-download"></i> O'rnatish</button>
+    <button id="pwa-install-dismiss" class="btn btn-ghost btn-sm" aria-label="Yopish"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+</div>
+
+<script src="js/pwa.js"></script>
 <script src="js/api.js"></script>
 <script src="js/views.js"></script>
 <script src="js/app.js"></script>
