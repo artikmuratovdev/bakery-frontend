@@ -1156,6 +1156,38 @@ tbody tr:hover {
   grid-column: span 2;
 }
 
+.form-section-title {
+  grid-column: span 2;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-primary);
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-1);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field .password-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.field .password-input-wrap input {
+  padding-right: 42px !important;
+}
+
+.field .password-input-wrap .password-toggle-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 .field label {
   font-size: var(--text-sm);
   font-weight: 600;
@@ -1552,5 +1584,3 @@ tbody tr:hover {
     padding-bottom: calc(var(--space-6) + env(safe-area-inset-bottom));
   }
 }
-
-

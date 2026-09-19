@@ -142,7 +142,6 @@ function hasCachedDataForRoute(route) {
   if (view === 'distribution') return ApiCache.hasMatch('/distribution');
   if (view === 'payments') return ApiCache.hasMatch('/payments') || ApiCache.hasMatch('/stores');
   if (view === 'reports') return ApiCache.hasMatch('/reports');
-  if (view === 'users') return ApiCache.has('/users');
   return false;
 }
 
@@ -331,7 +330,6 @@ const NAV_ITEMS = {
       { href: '#/businesses', label: 'Nonvoyxonalar', icon: '<i class="fa-solid fa-industry"></i>' },
       { href: '#/products', label: 'Mahsulotlar', icon: '<i class="fa-solid fa-bread-slice"></i>' },
       { href: '#/stores', label: "Do‘konlar", icon: '<i class="fa-solid fa-store"></i>' },
-      { href: '#/users', label: 'Foydalanuvchilar', icon: '<i class="fa-solid fa-users"></i>' },
     ]},
     { group: 'Amaliyot', items: [
       { href: '#/production', label: 'Ishlab chiqarish', icon: '<i class="fa-solid fa-kitchen-set"></i>' },
@@ -350,7 +348,6 @@ const NAV_ITEMS = {
     { group: 'Boshqaruv', items: [
       { href: '#/products', label: 'Mahsulotlar', icon: '<i class="fa-solid fa-bread-slice"></i>' },
       { href: '#/stores', label: "Do‘konlar", icon: '<i class="fa-solid fa-store"></i>' },
-      { href: '#/users', label: 'Foydalanuvchilar', icon: '<i class="fa-solid fa-users"></i>' },
     ]},
     { group: 'Amaliyot', items: [
       { href: '#/production', label: 'Ishlab chiqarish', icon: '<i class="fa-solid fa-kitchen-set"></i>' },
@@ -418,8 +415,7 @@ async function render(isRevalidating = false) {
     production: 'Ishlab chiqarish',
     distribution: 'Taqsimlash',
     payments: 'Naqd / Nasiya hisob-kitobi',
-    reports: 'Hisobotlar',
-    users: 'Foydalanuvchilar'
+    reports: 'Hisobotlar'
   };
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titleMap[view] || 'Boshqaruv paneli';
@@ -435,7 +431,6 @@ async function render(isRevalidating = false) {
     else if (view === 'payments') await renderPayments(content);
     else if (view === 'reports' && param === 'daily') await renderDailyReport(content);
     else if (view === 'reports' && param === 'overall') await renderOverallReport(content);
-    else if (view === 'users') await renderUsers(content);
     else content.innerHTML = `<div class="card card-body">Bunday sahifa topilmadi.</div>`;
   } catch (e) {
     if (!isRevalidating) {

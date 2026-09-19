@@ -9,7 +9,16 @@ function openModal(title, bodyHtml, onMount) {
   </div>`;
   document.body.appendChild(backdrop);
   backdrop.querySelector('.modal-close').onclick = () => backdrop.remove();
-  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  let isBackdropMouseDown = false;
+  backdrop.addEventListener('mousedown', (e) => {
+    isBackdropMouseDown = (e.target === backdrop);
+  });
+  backdrop.addEventListener('click', (e) => {
+    if (isBackdropMouseDown && e.target === backdrop) {
+      backdrop.remove();
+    }
+    isBackdropMouseDown = false;
+  });
   if (onMount) onMount(backdrop);
   return backdrop;
 }
@@ -248,36 +257,116 @@ async function renderBusinesses(content) {
 }
 
 function bizFormModal(biz) {
+  const isNew = !biz;
   openModal(biz ? 'Nonvoyxonani tahrirlash' : 'Yangi nonvoyxona', `
     <form id="biz-form">
       <div class="form-grid">
-        <div class="field span-2"><label>Nomi</label><input required id="f-name" value="${escapeHtml(biz?.name || '')}" placeholder="Masalan: Nonvoyxona №3" /></div>
-        <div class="field span-2"><label>Manzil</label><input id="f-address" value="${escapeHtml(biz?.address || '')}" placeholder="Masalan: Chilonzor tumani, 5-mavze" /></div>
-        <div class="field span-2"><label>Telefon</label><input type="tel" pattern="[0-9+\\-\\s()]{7,20}" id="f-phone" value="${escapeHtml(biz?.phone || '')}" placeholder="+998 90 123 45 67" title="Telefon raqami (masalan: +998 90 123 45 67)" /></div>
+        ${isNew ? `<div class="form-section-title"><i class="fa-solid fa-industry"></i> Nonvoyxona ma'lumotlari</div>` : ''}
+        <div class="field span-2"><label>Nonvoyxona nomi *</label><input required id="f-name" value="${escapeHtml(biz?.name || '')}" placeholder="Masalan: Nonvoyxona №3" /></div>
+        <div class="field span-2"><label>Manzil (ixtiyoriy)</label><input id="f-address" value="${escapeHtml(biz?.address || '')}" placeholder="Masalan: Chilonzor tumani, 5-mavze" /></div>
+        <div class="field span-2"><label>Telefon (ixtiyoriy)</label><input type="tel" pattern="[0-9+\\-\\s()]{7,20}" id="f-phone" value="${escapeHtml(biz?.phone || '')}" placeholder="+998 90 123 45 67" title="Telefon raqami (masalan: +998 90 123 45 67)" /></div>
+
+        ${isNew ? `
+          <div class="form-section-title"><i class="fa-solid fa-user-shield"></i> Nonvoyxona admini ma'lumotlari</div>
+          <div class="field span-2">
+            <label>Admin login *</label>
+            <input required id="f-username" pattern="[A-Za-z0-9_.-]{3,30}" placeholder="Masalan: nonvoy3" title="Login 3-30 ta harf, raqam, nuqta yoki pastki chiziqdan iborat bo'lishi kerak" autocomplete="off" />
+          </div>
+          <div class="field span-2">
+            <label>Admin parol *</label>
+            <div class="password-input-wrap">
+              <input required type="password" id="f-password" minlength="6" placeholder="Kamida 6 ta belgi" title="Parol kamida 6 ta belgidan iborat bo'lishi kerak" autocomplete="new-password" />
+              <button type="button" class="password-toggle-btn" id="biz-pwd-toggle" title="Parolni ko'rsatish/yashirish" tabindex="-1">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+        ` : ''}
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="cancel-btn">Bekor qilish</button>
-        <button type="submit" class="btn btn-primary">${biz ? 'Saqlash' : "Qo'shish"}</button>
+        <button type="submit" class="btn btn-primary" id="save-biz-btn">${biz ? 'Saqlash' : "Qo'shish"}</button>
       </div>
     </form>
   `, (m) => {
+    const pwdToggle = m.querySelector('#biz-pwd-toggle');
+    if (pwdToggle) {
+      pwdToggle.onclick = () => {
+        const input = m.querySelector('#f-password');
+        if (!input) return;
+        const isPwd = input.type === 'password';
+        input.type = isPwd ? 'text' : 'password';
+        pwdToggle.innerHTML = isPwd ? '<i class="fa-regular fa-eye-slash"></i>' : '<i class="fa-regular fa-eye"></i>';
+      };
+    }
+
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#biz-form').onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = m.querySelector('#save-biz-btn');
+      const nameVal = m.querySelector('#f-name').value.trim();
+      const addressVal = m.querySelector('#f-address').value.trim();
+      const phoneVal = m.querySelector('#f-phone').value.trim();
+
+      if (!nameVal) {
+        toast("Nonvoyxona nomini kiriting", 'error');
+        return;
+      }
+
       const body = {
-        name: document.getElementById('f-name').value.trim(),
-        address: document.getElementById('f-address').value.trim(),
-        phone: document.getElementById('f-phone').value.trim()
+        name: nameVal,
+        address: addressVal,
+        phone: phoneVal
       };
+
+      if (isNew) {
+        const usernameVal = m.querySelector('#f-username').value.trim();
+        const pwdInput = m.querySelector('#f-password');
+        const passwordVal = pwdInput ? pwdInput.value : '';
+
+        if (!usernameVal) {
+          toast("Admin loginini kiriting", 'error');
+          return;
+        }
+        if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(usernameVal)) {
+          toast("Login faqat harf, raqam va _ . - belgilaridan (3-30 ta) iborat bo'lishi kerak", 'error');
+          return;
+        }
+        if (!passwordVal || passwordVal.length < 6) {
+          toast("Parol kamida 6 belgidan iborat bo'lishi kerak", 'error');
+          return;
+        }
+
+        body.username = usernameVal;
+        body.password = passwordVal;
+      }
+
+      const originalBtnHtml = submitBtn.innerHTML;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
+
       try {
-        if (biz) await API.put('/businesses/' + biz.id, body);
-        else await API.post('/businesses', body);
-        toast(biz ? 'Yangilandi' : "Qo'shildi", 'success');
+        if (biz) {
+          await API.put('/businesses/' + biz.id, body);
+          toast('Nonvoyxona yangilandi', 'success');
+        } else {
+          await API.post('/businesses', body);
+          toast("Nonvoyxona va admin muvaffaqiyatli yaratildi", 'success');
+        }
+        if (body.password) body.password = '';
+        const pwdField = m.querySelector('#f-password');
+        if (pwdField) pwdField.value = '';
+
         m.remove();
         state.businesses = await API.get('/businesses');
         renderBusinessSwitcher();
         render();
-      } catch (err) { toast(err.message, 'error'); }
+      } catch (err) {
+        if (body.password) body.password = '';
+        toast(err.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnHtml;
+      }
     };
   });
 }
@@ -370,6 +459,7 @@ async function renderStores(content) {
   const bizId = effectiveBizId();
   const list = await API.get('/stores' + qs({ business_id: bizId }));
   const bizName = (id) => state.businesses.find(b => b.id == id)?.name || '';
+  const canManage = state.user.role === 'super_admin' || state.user.role === 'bakery_admin';
 
   // fetch debt summary per store quickly via distribution list is expensive; skip inline debt for list view to keep it fast
   content.innerHTML = `
@@ -380,7 +470,7 @@ async function renderStores(content) {
     <div class="card">
       <div class="card-header">
         <h3>Ro'yxat (${list.length})</h3>
-        <button class="btn btn-primary btn-sm" id="add-store-btn">+ Yangi do'kon</button>
+        ${canManage ? `<button class="btn btn-primary btn-sm" id="add-store-btn">+ Yangi do'kon</button>` : ''}
       </div>
       <div class="table-wrap"><table>
         <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th>Manzil</th><th>Telefon</th><th>Holati</th><th></th></tr></thead>
@@ -394,59 +484,154 @@ async function renderStores(content) {
               <td>${s.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
               <td><div class="row-actions">
                 <button class="icon-btn" data-view="${s.id}" title="Ko'rish"><i class="fa-solid fa-eye"></i></button>
-                <button class="icon-btn" data-edit="${s.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
-                <button class="icon-btn" data-del="${s.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
+                ${canManage ? `
+                  <button class="icon-btn" data-edit="${s.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
+                  <button class="icon-btn" data-del="${s.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
+                ` : ''}
               </div></td>
             </tr>
-          `).join('') || `<tr class="empty-row"><td colspan="6">Do'kon qo'shilmagan</td></tr>`}
+          `).join('') || `<tr class="empty-row"><td colspan="${!bizId ? 6 : 5}">Do'kon qo'shilmagan</td></tr>`}
         </tbody>
       </table></div>
     </div>
   `;
 
-  content.querySelector('#add-store-btn').onclick = () => storeFormModal(null, bizId);
+  const addStoreBtn = content.querySelector('#add-store-btn');
+  if (addStoreBtn) addStoreBtn.onclick = () => storeFormModal(null, bizId);
   content.querySelectorAll('[data-view]').forEach(b => b.onclick = () => location.hash = '#/stores/' + b.dataset.view);
-  content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => storeFormModal(list.find(x => x.id == b.dataset.edit)));
-  content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-    confirmAction("Bu do'konni o'chirmoqchimisiz?", async () => {
-      try { await API.del('/stores/' + b.dataset.del); toast("O'chirildi", 'success'); render(); }
-      catch (err) { toast(err.message, 'error'); }
+  if (canManage) {
+    content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => storeFormModal(list.find(x => x.id == b.dataset.edit)));
+    content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      confirmAction("Bu do'konni o'chirmoqchimisiz?", async () => {
+        try { await API.del('/stores/' + b.dataset.del); toast("O'chirildi", 'success'); render(); }
+        catch (err) { toast(err.message, 'error'); }
+      });
     });
-  });
+  }
 }
 
 function storeFormModal(store, defaultBizId) {
-  const needsBizSelect = state.user.role === 'super_admin';
+  const isNew = !store;
+  const isSuperAdmin = state.user.role === 'super_admin';
+
   openModal(store ? "Do'konni tahrirlash" : "Yangi do'kon", `
     <form id="store-form">
       <div class="form-grid">
-        ${needsBizSelect ? `<div class="field span-2"><label>Nonvoyxona</label>${bizSelectHtml('f-biz', store?.business_id || defaultBizId || state.businesses[0]?.id)}</div>` : ''}
-        <div class="field span-2"><label>Do'kon nomi</label><input required id="f-name" value="${escapeHtml(store?.name || '')}" placeholder="Masalan: Do'kon №1 (Markaz)" /></div>
-        <div class="field span-2"><label>Manzil</label><input id="f-address" value="${escapeHtml(store?.address || '')}" placeholder="Masalan: Amir Temur ko'chasi, 12" /></div>
-        <div class="field span-2"><label>Telefon</label><input type="tel" pattern="[0-9+\\-\\s()]{7,20}" id="f-phone" value="${escapeHtml(store?.phone || '')}" placeholder="+998 90 123 45 67" title="Telefon raqami (masalan: +998 90 123 45 67)" /></div>
+        ${isNew ? `<div class="form-section-title"><i class="fa-solid fa-store"></i> Do'kon ma'lumotlari</div>` : ''}
+        ${isNew && isSuperAdmin ? `<div class="field span-2"><label>Nonvoyxona *</label>${bizSelectHtml('f-biz', defaultBizId || state.businesses[0]?.id)}</div>` : ''}
+        <div class="field span-2"><label>Do'kon nomi *</label><input required id="f-name" value="${escapeHtml(store?.name || '')}" placeholder="Masalan: Do'kon №1 (Markaz)" /></div>
+        <div class="field span-2"><label>Manzil (ixtiyoriy)</label><input id="f-address" value="${escapeHtml(store?.address || '')}" placeholder="Masalan: Amir Temur ko'chasi, 12" /></div>
+        <div class="field span-2"><label>Telefon (ixtiyoriy)</label><input type="tel" pattern="[0-9+\\-\\s()]{7,20}" id="f-phone" value="${escapeHtml(store?.phone || '')}" placeholder="+998 90 123 45 67" title="Telefon raqami (masalan: +998 90 123 45 67)" /></div>
+
+        ${isNew ? `
+          <div class="form-section-title"><i class="fa-solid fa-user-tag"></i> Do'kon admini ma'lumotlari</div>
+          <div class="field span-2">
+            <label>Do'kon admini login *</label>
+            <input required id="f-username" pattern="[A-Za-z0-9_.-]{3,30}" placeholder="Masalan: dokon3" title="Login 3-30 ta harf, raqam, nuqta yoki pastki chiziqdan iborat bo'lishi kerak" autocomplete="off" />
+          </div>
+          <div class="field span-2">
+            <label>Do'kon admini parol *</label>
+            <div class="password-input-wrap">
+              <input required type="password" id="f-password" minlength="6" placeholder="Kamida 6 ta belgi" title="Parol kamida 6 ta belgidan iborat bo'lishi kerak" autocomplete="new-password" />
+              <button type="button" class="password-toggle-btn" id="store-pwd-toggle" title="Parolni ko'rsatish/yashirish" tabindex="-1">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+        ` : ''}
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="cancel-btn">Bekor qilish</button>
-        <button type="submit" class="btn btn-primary">${store ? 'Saqlash' : "Qo'shish"}</button>
+        <button type="submit" class="btn btn-primary" id="save-store-btn">${store ? 'Saqlash' : "Qo'shish"}</button>
       </div>
     </form>
   `, (m) => {
+    const pwdToggle = m.querySelector('#store-pwd-toggle');
+    if (pwdToggle) {
+      pwdToggle.onclick = () => {
+        const input = m.querySelector('#f-password');
+        if (!input) return;
+        const isPwd = input.type === 'password';
+        input.type = isPwd ? 'text' : 'password';
+        pwdToggle.innerHTML = isPwd ? '<i class="fa-regular fa-eye-slash"></i>' : '<i class="fa-regular fa-eye"></i>';
+      };
+    }
+
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#store-form').onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = m.querySelector('#save-store-btn');
+      const nameVal = m.querySelector('#f-name').value.trim();
+      const addressVal = m.querySelector('#f-address').value.trim();
+      const phoneVal = m.querySelector('#f-phone').value.trim();
+
+      if (!nameVal) {
+        toast("Do'kon nomini kiriting", 'error');
+        return;
+      }
+
       const body = {
-        name: document.getElementById('f-name').value.trim(),
-        address: document.getElementById('f-address').value.trim(),
-        phone: document.getElementById('f-phone').value.trim()
+        name: nameVal,
+        address: addressVal,
+        phone: phoneVal
       };
-      if (needsBizSelect) body.business_id = document.getElementById('f-biz').value;
+
+      if (isNew) {
+        if (isSuperAdmin) {
+          const bizEl = m.querySelector('#f-biz');
+          const bizIdVal = bizEl ? bizEl.value : defaultBizId;
+          if (!bizIdVal) {
+            toast("Nonvoyxonani tanlang", 'error');
+            return;
+          }
+          body.business_id = Number(bizIdVal) || bizIdVal;
+        }
+
+        const usernameVal = m.querySelector('#f-username').value.trim();
+        const pwdInput = m.querySelector('#f-password');
+        const passwordVal = pwdInput ? pwdInput.value : '';
+
+        if (!usernameVal) {
+          toast("Do'kon admini loginini kiriting", 'error');
+          return;
+        }
+        if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(usernameVal)) {
+          toast("Login faqat harf, raqam va _ . - belgilaridan (3-30 ta) iborat bo'lishi kerak", 'error');
+          return;
+        }
+        if (!passwordVal || passwordVal.length < 6) {
+          toast("Parol kamida 6 belgidan iborat bo'lishi kerak", 'error');
+          return;
+        }
+
+        body.username = usernameVal;
+        body.password = passwordVal;
+      }
+
+      const originalBtnHtml = submitBtn.innerHTML;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
+
       try {
-        if (store) await API.put('/stores/' + store.id, body);
-        else await API.post('/stores', body);
-        toast(store ? 'Yangilandi' : "Qo'shildi", 'success');
+        if (store) {
+          await API.put('/stores/' + store.id, body);
+          toast("Do'kon yangilandi", 'success');
+        } else {
+          await API.post('/stores', body);
+          toast("Do'kon va admin muvaffaqiyatli yaratildi", 'success');
+        }
+        if (body.password) body.password = '';
+        const pwdField = m.querySelector('#f-password');
+        if (pwdField) pwdField.value = '';
+
         m.remove();
         render();
-      } catch (err) { toast(err.message, 'error'); }
+      } catch (err) {
+        if (body.password) body.password = '';
+        toast(err.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnHtml;
+      }
     };
   });
 }
@@ -712,8 +897,8 @@ function distributionFormModal(defaultBizId) {
             <option value="mixed">Aralash (naqd + nasiya)</option>
           </select>
         </div>
-        <div class="field" id="f-cash-wrap" style="display:none;"><label>Naqd summa</label><input type="number" min="0" step="100" id="f-cash" placeholder="0" /></div>
-        <div class="field" id="f-credit-wrap" style="display:none;"><label>Nasiya summa</label><input type="number" min="0" step="100" id="f-credit" placeholder="0" /></div>
+        <div class="field" id="f-cash-wrap" style="display:none;"><label>Naqd summa</label><input type="number" min="0" step="any" id="f-cash" placeholder="0" /></div>
+        <div class="field" id="f-credit-wrap" style="display:none;"><label>Nasiya summa</label><input type="number" min="0" step="any" id="f-credit" placeholder="0" /></div>
         <div class="field span-2"><div id="f-total" class="field-hint"></div></div>
       </div>
       <div class="form-actions">
@@ -758,11 +943,42 @@ function distributionFormModal(defaultBizId) {
 
     function syncPaymentFields() {
       const type = m.querySelector('#f-pay-type').value;
+      const cashEl = m.querySelector('#f-cash');
+      const creditEl = m.querySelector('#f-credit');
       m.querySelector('#f-cash-wrap').style.display = type === 'credit' ? 'none' : '';
       m.querySelector('#f-credit-wrap').style.display = type === 'cash' ? 'none' : '';
-      if (type === 'cash') { m.querySelector('#f-cash').value = currentTotal; m.querySelector('#f-credit-wrap').querySelector('input') && (document.getElementById('f-credit').value = 0); }
-      if (type === 'credit') { document.getElementById('f-credit').value = currentTotal; document.getElementById('f-cash').value = 0; }
-      if (type === 'mixed') { document.getElementById('f-cash').value = currentTotal; document.getElementById('f-credit').value = 0; }
+
+      if (type === 'cash') {
+        cashEl.value = currentTotal;
+        creditEl.value = 0;
+      } else if (type === 'credit') {
+        creditEl.value = currentTotal;
+        cashEl.value = 0;
+      } else if (type === 'mixed') {
+        const currentCash = Number(cashEl.value) || 0;
+        if (currentCash > 0) {
+          creditEl.value = Math.max(0, currentTotal - currentCash);
+        } else {
+          cashEl.value = '';
+          creditEl.value = currentTotal;
+        }
+      }
+    }
+
+    function onCashInput() {
+      if (m.querySelector('#f-pay-type').value !== 'mixed') return;
+      const cashVal = m.querySelector('#f-cash').value;
+      const cash = Number(cashVal) || 0;
+      const credit = Math.max(0, currentTotal - cash);
+      m.querySelector('#f-credit').value = credit;
+    }
+
+    function onCreditInput() {
+      if (m.querySelector('#f-pay-type').value !== 'mixed') return;
+      const creditVal = m.querySelector('#f-credit').value;
+      const credit = Number(creditVal) || 0;
+      const cash = Math.max(0, currentTotal - credit);
+      m.querySelector('#f-cash').value = cash;
     }
 
     await loadForBiz(initialBiz);
@@ -770,6 +986,8 @@ function distributionFormModal(defaultBizId) {
     m.querySelector('#f-product').addEventListener('change', () => { updateTotal(); updateStockHint(); });
     m.querySelector('#f-qty').addEventListener('input', updateTotal);
     m.querySelector('#f-pay-type').addEventListener('change', syncPaymentFields);
+    m.querySelector('#f-cash').addEventListener('input', onCashInput);
+    m.querySelector('#f-credit').addEventListener('input', onCreditInput);
 
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#dist-form').onsubmit = async (e) => {
@@ -799,15 +1017,17 @@ function distributionFormModal(defaultBizId) {
 /* ===================== PAYMENTS (Naqd/Nasiya) ===================== */
 async function renderPayments(content) {
   const bizId = effectiveBizId();
-  if (state.user.role === 'super_admin' && !bizId) {
-    content.innerHTML = `<div class="alert alert-info"><i class="fa-solid fa-circle-info"></i> Qarz va to'lovlarni ko'rish uchun yuqoridan nonvoyxonani tanlang.</div>`;
-    return;
-  }
+  const isAllBusinesses = state.user.role === 'super_admin' && !bizId;
+  const bizName = (id) => state.businesses?.find(b => b.id == id)?.name || '';
+
   const [stores, distributions, payments] = await Promise.all([
     API.get('/stores' + qs({ business_id: bizId })),
     API.get('/distribution' + qs({ business_id: bizId })),
     API.get('/payments' + qs({ business_id: bizId }))
   ]);
+
+  const storeBizMap = {};
+  stores.forEach(s => { storeBizMap[s.id] = s.business_id; });
 
   const byStore = {};
   stores.forEach(s => byStore[s.id] = { store: s, cash: 0, credit: 0, total: 0, paid: 0 });
@@ -823,25 +1043,88 @@ async function renderPayments(content) {
   const totalDebt = rows.reduce((s, r) => s + (r.credit - r.paid), 0);
   const totalCash = rows.reduce((s, r) => s + r.cash, 0);
   const totalCredit = rows.reduce((s, r) => s + r.credit, 0);
+  const totalPaid = rows.reduce((s, r) => s + r.paid, 0);
+
+  // Nonvoyxonalar bo'yicha umumiy hisob-kitob (barcha nonvoyxonalar ko'rilayotgan bo'lsa)
+  let bizSummaryHtml = '';
+  if (isAllBusinesses) {
+    const byBiz = {};
+    (state.businesses || []).forEach(b => {
+      byBiz[b.id] = { id: b.id, name: b.name, storesCount: 0, total: 0, cash: 0, credit: 0, paid: 0, debt: 0 };
+    });
+
+    rows.forEach(r => {
+      const bId = r.store.business_id;
+      if (!byBiz[bId]) {
+        const found = (state.businesses || []).find(b => b.id == bId);
+        byBiz[bId] = { id: bId, name: found?.name || `Nonvoyxona #${bId}`, storesCount: 0, total: 0, cash: 0, credit: 0, paid: 0, debt: 0 };
+      }
+      byBiz[bId].storesCount += 1;
+      byBiz[bId].total += r.total;
+      byBiz[bId].cash += r.cash;
+      byBiz[bId].credit += r.credit;
+      byBiz[bId].paid += r.paid;
+    });
+
+    Object.values(byBiz).forEach(b => {
+      b.debt = b.credit - b.paid;
+    });
+
+    const bizRows = Object.values(byBiz);
+    bizSummaryHtml = `
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-header"><h3>Nonvoyxonalar bo'yicha hisob-kitob</h3></div>
+        <div class="table-wrap"><table>
+          <thead>
+            <tr>
+              <th>Nonvoyxona</th>
+              <th class="text-right">Do'konlar soni</th>
+              <th class="text-right">Jami sotuv</th>
+              <th class="text-right">Naqd</th>
+              <th class="text-right">Nasiya</th>
+              <th class="text-right">To'langan</th>
+              <th class="text-right">Qolgan qarz</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bizRows.length ? bizRows.map(b => `
+              <tr>
+                <td><strong>${escapeHtml(b.name)}</strong></td>
+                <td class="text-right num">${b.storesCount}</td>
+                <td class="text-right num">${fmtMoney(b.total)}</td>
+                <td class="text-right num">${fmtMoney(b.cash)}</td>
+                <td class="text-right num">${fmtMoney(b.credit)}</td>
+                <td class="text-right num">${fmtMoney(b.paid)}</td>
+                <td class="text-right num">${b.debt > 0 ? `<span class="badge badge-red">${fmtMoney(b.debt)}</span>` : `<span class="badge badge-green">0 so'm</span>`}</td>
+              </tr>
+            `).join('') : `<tr class="empty-row"><td colspan="7">Nonvoyxonalar topilmadi</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    `;
+  }
 
   content.innerHTML = `
     <div class="section-head">
       <h2>Naqd / Nasiya hisob-kitobi</h2>
-      <p>Har bir do'konning to'lov holati va qarzdorligi</p>
+      <p>${isAllBusinesses ? "Barcha nonvoyxonalar bo'yicha to'lov holati va qarzdorlik" : "Har bir do'konning to'lov holati va qarzdorligi"}</p>
     </div>
-    <div class="grid grid-3" style="margin-bottom:20px;">
+    <div class="grid grid-4" style="margin-bottom:20px;">
       ${statCard('<i class="fa-solid fa-money-bill-wave"></i>', 'Jami naqd', fmtMoney(totalCash), '', 'green')}
       ${statCard('<i class="fa-solid fa-clipboard-list"></i>', 'Jami nasiya', fmtMoney(totalCredit), '', 'blue')}
+      ${statCard('<i class="fa-solid fa-circle-check"></i>', "Jami to'langan", fmtMoney(totalPaid), '', 'green')}
       ${statCard('<i class="fa-solid fa-triangle-exclamation"></i>', 'Jami qarzdorlik', fmtMoney(totalDebt), '', 'red')}
     </div>
+    ${bizSummaryHtml}
     <div class="card" style="margin-bottom:20px;">
       <div class="card-header"><h3>Do'konlar bo'yicha holat</h3></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Do'kon</th><th class="text-right">Jami sotuv</th><th class="text-right">Naqd</th><th class="text-right">Nasiya</th><th class="text-right">To'langan</th><th class="text-right">Qolgan qarz</th><th></th></tr></thead>
+        <thead><tr>${isAllBusinesses ? '<th>Nonvoyxona</th>' : ''}<th>Do'kon</th><th class="text-right">Jami sotuv</th><th class="text-right">Naqd</th><th class="text-right">Nasiya</th><th class="text-right">To'langan</th><th class="text-right">Qolgan qarz</th><th></th></tr></thead>
         <tbody>
           ${rows.length ? rows.map(r => {
             const remaining = r.credit - r.paid;
             return `<tr>
+              ${isAllBusinesses ? `<td class="muted">${escapeHtml(bizName(r.store.business_id))}</td>` : ''}
               <td><a href="#/stores/${r.store.id}" style="color:var(--accent);font-weight:600;text-decoration:none;">${escapeHtml(r.store.name)}</a></td>
               <td class="text-right num">${fmtMoney(r.total)}</td>
               <td class="text-right num">${fmtMoney(r.cash)}</td>
@@ -850,13 +1133,13 @@ async function renderPayments(content) {
               <td class="text-right num">${remaining > 0 ? `<span class="badge badge-red">${fmtMoney(remaining)}</span>` : `<span class="badge badge-green">0 so'm</span>`}</td>
               <td>${remaining > 0 ? `<button class="btn btn-secondary btn-sm" data-pay="${r.store.id}" data-debt="${remaining}">To'lash</button>` : ''}</td>
             </tr>`;
-          }).join('') : `<tr class="empty-row"><td colspan="7">Do'kon topilmadi</td></tr>`}
+          }).join('') : `<tr class="empty-row"><td colspan="${isAllBusinesses ? 8 : 7}">Do'kon topilmadi</td></tr>`}
         </tbody>
       </table></div>
     </div>
     <div class="card">
       <div class="card-header"><h3>So'nggi to'lovlar</h3></div>
-      ${renderPaymentsTableWithStore(payments)}
+      ${renderPaymentsTableWithStore(payments, isAllBusinesses, storeBizMap)}
     </div>
   `;
 
@@ -866,13 +1149,20 @@ async function renderPayments(content) {
   });
 }
 
-function renderPaymentsTableWithStore(rows) {
+function renderPaymentsTableWithStore(rows, showBiz = false, storeBizMap = {}) {
+  const bizName = (id) => state.businesses?.find(b => b.id == id)?.name || '';
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Sana</th><th>Do'kon</th><th>Izoh</th><th class="text-right">Summa</th></tr></thead>
+    <thead><tr>${showBiz ? '<th>Nonvoyxona</th>' : ''}<th>Sana</th><th>Do'kon</th><th>Izoh</th><th class="text-right">Summa</th></tr></thead>
     <tbody>
       ${rows.length ? rows.slice(0, 30).map(r => `
-        <tr><td>${fmtDate(r.date)}</td><td>${escapeHtml(r.store_name)}</td><td class="muted">${escapeHtml(r.note || '—')}</td><td class="text-right num">${fmtMoney(r.amount)}</td></tr>
-      `).join('') : `<tr class="empty-row"><td colspan="4">To'lov qilinmagan</td></tr>`}
+        <tr>
+          ${showBiz ? `<td class="muted">${escapeHtml(r.business_name || bizName(r.business_id || storeBizMap[r.store_id]) || '—')}</td>` : ''}
+          <td>${fmtDate(r.date)}</td>
+          <td>${escapeHtml(r.store_name)}</td>
+          <td class="muted">${escapeHtml(r.note || '—')}</td>
+          <td class="text-right num">${fmtMoney(r.amount)}</td>
+        </tr>
+      `).join('') : `<tr class="empty-row"><td colspan="${showBiz ? 5 : 4}">To'lov qilinmagan</td></tr>`}
     </tbody>
   </table></div>`;
 }
@@ -883,7 +1173,7 @@ function paymentFormModal(store, currentDebt) {
     <form id="pay-form">
       <div class="form-grid">
         <div class="field"><label>Sana</label><input type="date" id="f-date" value="${todayStr()}" required /></div>
-        <div class="field"><label>To'lov summasi</label><input type="number" min="1" max="${currentDebt}" step="100" id="f-amount" placeholder="Masalan: 50000" required /></div>
+        <div class="field"><label>To'lov summasi</label><input type="number" min="1" max="${currentDebt}" step="any" id="f-amount" placeholder="Masalan: 50000" required /></div>
         <div class="field span-2"><label>Izoh (ixtiyoriy)</label><input id="f-note" placeholder="Masalan: qisman to'lov" /></div>
       </div>
       <div class="form-actions">
@@ -1016,108 +1306,4 @@ async function renderOverallReport(content) {
   content.querySelector('#clear-range').onclick = () => { state.reportFrom = ''; state.reportTo = ''; render(); };
 }
 
-/* ===================== USERS ===================== */
-async function renderUsers(content) {
-  const list = await API.get('/users');
-  content.innerHTML = `
-    <div class="section-head">
-      <h2>Foydalanuvchilar</h2>
-      <p>Tizimga kirish huquqiga ega foydalanuvchilarni boshqaring</p>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <h3>Ro'yxat (${list.length})</h3>
-        <button class="btn btn-primary btn-sm" id="add-user-btn">+ Yangi foydalanuvchi</button>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Login</th><th>F.I.Sh.</th><th>Rol</th>${state.user.role === 'super_admin' ? '<th>Nonvoyxona</th>' : ''}<th>Holati</th><th></th></tr></thead>
-        <tbody>
-          ${list.map(u => `
-            <tr>
-              <td><strong>${escapeHtml(u.username)}</strong></td>
-              <td>${escapeHtml(u.full_name || '—')}</td>
-              <td><span class="badge badge-accent">${roleLabel(u.role)}</span></td>
-              ${state.user.role === 'super_admin' ? `<td class="muted">${escapeHtml(u.business_name || '—')}</td>` : ''}
-              <td>${u.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
-              <td><div class="row-actions">
-                ${u.id !== state.user.id ? `<button class="icon-btn" data-del="${u.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>` : ''}
-              </div></td>
-            </tr>
-          `).join('') || `<tr class="empty-row"><td colspan="6">Foydalanuvchi yo'q</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-  `;
 
-  content.querySelector('#add-user-btn').onclick = () => userFormModal();
-  content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-    confirmAction("Bu foydalanuvchini o'chirmoqchimisiz?", async () => {
-      try { await API.del('/users/' + b.dataset.del); toast("O'chirildi", 'success'); render(); }
-      catch (err) { toast(err.message, 'error'); }
-    });
-  });
-}
-
-function userFormModal() {
-  const isSuperAdmin = state.user.role === 'super_admin';
-  const roleOptions = isSuperAdmin
-    ? ['super_admin', 'bakery_admin', 'store']
-    : ['store'];
-
-  openModal("Yangi foydalanuvchi", `
-    <form id="user-form">
-      <div class="form-grid">
-        <div class="field"><label>Login</label><input required id="f-username" pattern="[A-Za-z0-9_]{3,30}" placeholder="Login (kamida 3 ta belgi)" title="Faqat harflar, raqamlar va pastki chiziq" /></div>
-        <div class="field"><label>Parol</label><input required id="f-password" type="text" minlength="4" placeholder="Parol (kamida 4 ta belgi)" title="Parol kamida 4 ta belgi bo'lishi kerak" /></div>
-        <div class="field span-2"><label>F.I.Sh.</label><input id="f-fullname" placeholder="To'liq ismi sharifi" /></div>
-        <div class="field span-2"><label>Rol</label>
-          <select id="f-role">${roleOptions.map(r => `<option value="${r}">${roleLabel(r)}</option>`).join('')}</select>
-        </div>
-        ${isSuperAdmin ? `<div class="field span-2" id="f-biz-wrap"><label>Nonvoyxona</label>${bizSelectHtml('f-biz', state.currentBusinessId || state.businesses[0]?.id)}</div>` : ''}
-        <div class="field span-2" id="f-store-wrap" style="display:none;"><label>Do'kon</label><select id="f-store"></select></div>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="btn btn-secondary" id="cancel-btn">Bekor qilish</button>
-        <button type="submit" class="btn btn-primary">Qo'shish</button>
-      </div>
-    </form>
-  `, (m) => {
-    async function syncFields() {
-      const role = m.querySelector('#f-role').value;
-      const storeWrap = m.querySelector('#f-store-wrap');
-      const bizWrap = m.querySelector('#f-biz-wrap');
-      if (bizWrap) bizWrap.style.display = role === 'super_admin' ? 'none' : '';
-      if (role === 'store') {
-        storeWrap.style.display = '';
-        const bizId = isSuperAdmin ? m.querySelector('#f-biz').value : state.user.business_id;
-        const stores = await API.get('/stores' + qs({ business_id: bizId }));
-        m.querySelector('#f-store').innerHTML = stores.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('') || `<option value="">Do'kon yo'q</option>`;
-      } else {
-        storeWrap.style.display = 'none';
-      }
-    }
-    syncFields();
-    m.querySelector('#f-role').addEventListener('change', syncFields);
-    if (isSuperAdmin) m.querySelector('#f-biz').addEventListener('change', syncFields);
-
-    m.querySelector('#cancel-btn').onclick = () => m.remove();
-    m.querySelector('#user-form').onsubmit = async (e) => {
-      e.preventDefault();
-      const role = m.querySelector('#f-role').value;
-      const body = {
-        username: m.querySelector('#f-username').value.trim(),
-        password: m.querySelector('#f-password').value,
-        full_name: m.querySelector('#f-fullname').value.trim(),
-        role
-      };
-      if (isSuperAdmin && role !== 'super_admin') body.business_id = m.querySelector('#f-biz').value;
-      if (role === 'store') body.store_id = m.querySelector('#f-store').value;
-      try {
-        await API.post('/users', body);
-        toast("Foydalanuvchi qo'shildi", 'success');
-        m.remove();
-        render();
-      } catch (err) { toast(err.message, 'error'); }
-    };
-  });
-}
