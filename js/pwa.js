@@ -162,3 +162,86 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.add('is-standalone-pwa');
   }
 });
+
+// ==========================================
+// BILDIRISHNOMALAR VA BACKGROUND SYNC BOSHQARUVI
+// ==========================================
+
+// Bildirishnoma ruxsatini so'rash
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) {
+    console.warn('[PWA] Ushbu brauzer bildirishnomalarni qo\'llab-quvvatlamaydi.');
+    return false;
+  }
+
+  if (Notification.permission === 'granted') {
+    return true;
+  }
+
+  if (Notification.permission !== 'denied') {
+    const permission = await Notification.requestPermission();
+    return permission === 'granted';
+  }
+
+  return false;
+}
+
+// Bildirishnoma chiqarish (masalan, yangi buyurtma yoki internet tiklanganda)
+async function showNotification(title, options = {}) {
+  const hasPermission = await requestNotificationPermission();
+  if (!hasPermission) return;
+
+  const defaultOptions = {
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    vibrate: [100, 50, 100],
+    ...options
+  };
+
+  if ('serviceWorker' in navigator) {
+    const reg = await navigator.serviceWorker.ready;
+    if (reg && reg.showNotification) {
+      return reg.showNotification(title, defaultOptions);
+    }
+  }
+
+  // Standart bildirishnoma fallback
+  return new Notification(title, defaultOptions);
+}
+
+// Background Sync ro'yxatdan o'tkazish
+async function registerBackgroundSync(tag = 'sync-offline-queue') {
+  if ('serviceWorker' in navigator && 'SyncManager' in window) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.sync.register(tag);
+      console.log(`[PWA] Background sync ro'yxatga olindi: ${tag}`);
+      return true;
+    } catch (err) {
+      console.warn('[PWA] Background sync xatoligi:', err);
+    }
+  }
+  return false;
+}
+
+// Service Worker-dan keladigan xabarlarni tutish
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'SYNC_OFFLINE_QUEUE') {
+      console.log('[PWA] Background sync hodisasi keldi, ma\'lumotlar yangilanmoqda...');
+      if (typeof render === 'function' && window.state?.user) {
+        render(true);
+      }
+    }
+  });
+}
+
+// Global PWA obyekti
+window.PWA = {
+  requestNotificationPermission,
+  showNotification,
+  registerBackgroundSync,
+  triggerPwaInstall,
+  isRunningStandalone
+};
+

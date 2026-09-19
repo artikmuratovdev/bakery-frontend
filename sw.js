@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bek-nonlari-v2';
+const CACHE_NAME = 'bek-nonlari-v3';
 const DATA_CACHE_NAME = 'bek-nonlari-api-v1';
 
 const STATIC_ASSETS = [
@@ -144,3 +144,73 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// ==========================================
+// PUSH BILDIRISHNOMALAR (Push Notifications)
+// ==========================================
+self.addEventListener('push', (event) => {
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data = { title: 'Bek Nonlari', body: event.data.text() };
+    }
+  }
+
+  const title = data.title || 'Bek Nonlari — Boshqaruv Tizimi';
+  const options = {
+    body: data.body || 'Yangi bildirishnoma mavjud.',
+    icon: data.icon || './icons/icon-192.png',
+    badge: data.badge || './icons/icon-192.png',
+    data: {
+      url: data.url || './'
+    },
+    vibrate: [100, 50, 100],
+    tag: data.tag || 'bek-nonlari-notification',
+    renotify: true,
+    actions: data.actions || [
+      { action: 'open', title: 'Ochish' }
+    ]
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Bildirishnoma bosilganda ilovani ochish
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || './';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          if (client.url.includes(self.location.origin)) {
+            client.navigate(targetUrl);
+            return client.focus();
+          }
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
+  );
+});
+
+// ==========================================
+// BACKGROUND SYNC (Orqa fonda sinxronlash)
+// ==========================================
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-offline-queue') {
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({ type: 'SYNC_OFFLINE_QUEUE' });
+        });
+      })
+    );
+  }
+});
+
