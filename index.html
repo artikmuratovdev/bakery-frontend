@@ -93,9 +93,29 @@
     </div>
     <nav class="sidebar-nav" id="nav-links"></nav>
     <div class="sidebar-footer">
-      <button id="theme-toggle" class="theme-toggle" title="Mavzuni almashtirish">
-        <span id="theme-icon"><i class="fa-solid fa-moon"></i></span> <span id="theme-label">Tungi rejim</span>
+      <button id="pwa-install-btn" class="sidebar-action-btn sidebar-install-btn hidden" title="Ilovani telefoningizga o'rnatish">
+        <div class="sidebar-action-left">
+          <span class="action-icon action-icon-install"><i class="fa-solid fa-mobile-screen-button"></i></span>
+          <span class="action-text">Ilovani o'rnatish</span>
+        </div>
+        <span class="install-badge">APK</span>
       </button>
+      <button id="theme-toggle" class="sidebar-action-btn sidebar-theme-btn" title="Mavzuni almashtirish">
+        <div class="sidebar-action-left">
+          <span class="action-icon" id="theme-icon"><i class="fa-solid fa-moon"></i></span>
+          <span class="action-text" id="theme-label">Tungi rejim</span>
+        </div>
+      </button>
+      <div class="sidebar-user-card" id="sidebar-user-card">
+        <div class="sidebar-user-avatar" id="sidebar-user-avatar"><i class="fa-solid fa-user"></i></div>
+        <div class="sidebar-user-info">
+          <span class="sidebar-user-name" id="sidebar-user-name">Foydalanuvchi</span>
+          <span class="sidebar-user-role" id="sidebar-user-role">...</span>
+        </div>
+        <button id="logout-btn" class="sidebar-logout-btn" title="Tizimdan chiqish" aria-label="Chiqish">
+          <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        </button>
+      </div>
     </div>
   </aside>
 
@@ -107,10 +127,8 @@
       </div>
       <div class="topbar-right">
         <div id="sync-status" class="sync-status-pill hidden" title="Ma'lumotlar holati"></div>
-        <button id="pwa-install-btn" class="pwa-install-btn-top hidden" title="Ilovani o'rnatish"><i class="fa-solid fa-cloud-arrow-down"></i> O'rnatish</button>
         <div class="business-switcher" id="business-switcher"></div>
         <div class="user-chip" id="user-chip"></div>
-        <button id="logout-btn" class="btn btn-ghost btn-sm" title="Tizimdan chiqish"><i class="fa-solid fa-arrow-right-from-bracket"></i> Chiqish</button>
       </div>
     </header>
     <main class="content" id="content"></main>
@@ -132,6 +150,49 @@
     <button id="pwa-install-action" class="btn btn-primary btn-sm">
       <i class="fa-solid fa-download"></i> O'rnatish</button>
     <button id="pwa-install-dismiss" class="btn btn-ghost btn-sm" aria-label="Yopish"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+</div>
+
+<!-- PWA O'RNATISH YO'RIQNOMA MODALI -->
+<div id="pwa-guide-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pwa-guide-title">
+  <div class="modal" style="max-width: 440px;">
+    <div class="modal-head">
+      <h3 id="pwa-guide-title" style="display: flex; align-items: center; gap: 8px;">
+        <i class="fa-solid fa-mobile-screen-button" style="color: var(--color-primary);"></i>
+        Ilovani o'rnatish
+      </h3>
+      <button class="modal-close" id="pwa-guide-close" aria-label="Yopish"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="modal-body" style="padding: 16px 20px; font-size: var(--text-sm);">
+      <p style="margin-bottom: 14px; color: var(--color-text-muted);">
+        Bek Nonlari ilovasini mobil qurilmangizga o'rnatish uchun quyidagi ko'rsatmalarga amal qiling:
+      </p>
+      
+      <div class="pwa-guide-step-card" style="margin-bottom: 12px;">
+        <div class="pwa-guide-platform-title">
+          <i class="fa-brands fa-android" style="color: #3ddc84; font-size: 18px;"></i>
+          <strong>Android (Google Chrome)</strong>
+        </div>
+        <ol class="pwa-guide-list">
+          <li>Brauzerning yuqori o'ng burchagidagi <strong>(⋮) uch nuqta</strong> tugmasini bosing.</li>
+          <li>Menyudan <strong>"Ilovani o'rnatish"</strong> yoki <strong>"Bosh ekranga qo'shish"</strong> bandini tanlang.</li>
+        </ol>
+      </div>
+
+      <div class="pwa-guide-step-card">
+        <div class="pwa-guide-platform-title">
+          <i class="fa-brands fa-apple" style="color: #888; font-size: 18px;"></i>
+          <strong>iPhone / iPad (Safari)</strong>
+        </div>
+        <ol class="pwa-guide-list">
+          <li>Safari pastki qismidagi <strong>Ulashish (<i class="fa-solid fa-arrow-up-from-bracket"></i> Share)</strong> tugmasini bosing.</li>
+          <li>Pastga varaqlab <strong>"Bosh ekranga qo'shish" (Add to Home Screen)</strong> bandini bosing.</li>
+        </ol>
+      </div>
+    </div>
+    <div class="modal-actions" style="padding: 12px 20px;">
+      <button class="btn btn-primary btn-block" id="pwa-guide-ok">Tushunarli</button>
+    </div>
   </div>
 </div>
 

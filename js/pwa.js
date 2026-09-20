@@ -70,7 +70,7 @@ window.addEventListener('appinstalled', () => {
 // O'rnatish interfeysini ko'rsatish
 function showInstallUI() {
   const installBanner = document.getElementById('pwa-install-banner');
-  const installBtnTop = document.getElementById('pwa-install-btn');
+  const installBtn = document.getElementById('pwa-install-btn');
   const loginInstallBtn = document.getElementById('login-pwa-install-btn');
 
   if (installBanner) {
@@ -83,8 +83,8 @@ function showInstallUI() {
     }
   }
 
-  if (installBtnTop) {
-    installBtnTop.classList.remove('hidden');
+  if (installBtn) {
+    installBtn.classList.remove('hidden');
   }
 
   if (loginInstallBtn) {
@@ -95,24 +95,39 @@ function showInstallUI() {
 // O'rnatish interfeysini yashirish
 function hideInstallUI() {
   const installBanner = document.getElementById('pwa-install-banner');
-  const installBtnTop = document.getElementById('pwa-install-btn');
+  const installBtn = document.getElementById('pwa-install-btn');
   const loginInstallBtn = document.getElementById('login-pwa-install-btn');
 
   if (installBanner) {
     installBanner.classList.add('hidden');
   }
-  if (installBtnTop) {
-    installBtnTop.classList.add('hidden');
+  if (installBtn) {
+    installBtn.classList.add('hidden');
   }
   if (loginInstallBtn) {
     loginInstallBtn.classList.add('hidden');
   }
 }
 
+// O'rnatish qo'llanma modalini ko'rsatish / yashirish
+function openPwaGuideModal() {
+  const modal = document.getElementById('pwa-guide-modal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closePwaGuideModal() {
+  const modal = document.getElementById('pwa-guide-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
 // O'rnatish jarayonini chaqirish
 async function triggerPwaInstall() {
+  if (typeof closeSidebar === 'function') {
+    closeSidebar();
+  }
+
   if (!deferredInstallPrompt) {
-    alert('Ilovani o\'rnatish uchun brauzeringiz menyusidan (uch nuqta) "Ilovani o\'rnatish" yoki "Bosh ekranga qo\'shish" bandini tanlang.');
+    openPwaGuideModal();
     return;
   }
 
@@ -127,22 +142,26 @@ async function triggerPwaInstall() {
     }
   } catch (err) {
     console.error('[PWA] O\'rnatishda xatolik:', err);
+    openPwaGuideModal();
   }
 }
 
 // DOM yuklanganda hodisalarni bog'lash
 document.addEventListener('DOMContentLoaded', () => {
   const installActionBtn = document.getElementById('pwa-install-action');
-  const installTopBtn = document.getElementById('pwa-install-btn');
+  const installBtn = document.getElementById('pwa-install-btn');
   const loginInstallBtn = document.getElementById('login-pwa-install-btn');
   const installDismissBtn = document.getElementById('pwa-install-dismiss');
+  const guideClose = document.getElementById('pwa-guide-close');
+  const guideOk = document.getElementById('pwa-guide-ok');
+  const guideModal = document.getElementById('pwa-guide-modal');
 
   if (installActionBtn) {
     installActionBtn.addEventListener('click', triggerPwaInstall);
   }
 
-  if (installTopBtn) {
-    installTopBtn.addEventListener('click', triggerPwaInstall);
+  if (installBtn) {
+    installBtn.addEventListener('click', triggerPwaInstall);
   }
 
   if (loginInstallBtn) {
@@ -156,10 +175,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  if (guideClose) {
+    guideClose.addEventListener('click', closePwaGuideModal);
+  }
+
+  if (guideOk) {
+    guideOk.addEventListener('click', closePwaGuideModal);
+  }
+
+  if (guideModal) {
+    guideModal.addEventListener('click', (e) => {
+      if (e.target === guideModal) closePwaGuideModal();
+    });
+  }
+
   // Agar ilova allaqachon standalone rejimda ochilgan bo'lsa
   if (isRunningStandalone()) {
     hideInstallUI();
     document.body.classList.add('is-standalone-pwa');
+  } else {
+    // Standalone bo'lmasa, o'rnatish tugmasini faol ko'rsatamiz
+    showInstallUI();
   }
 });
 

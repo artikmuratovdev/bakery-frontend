@@ -267,6 +267,7 @@ async function onLogout() {
   ApiCache.clear();
   state.user = null;
   location.hash = '#/dashboard';
+  closeSidebar();
   showLogin();
 }
 
@@ -279,9 +280,28 @@ async function afterLogin() {
     appShell.style.display = '';
   }
 
+  const roleName = roleLabel(state.user.role);
+  const displayName = state.user.full_name || state.user.username || 'Foydalanuvchi';
+
   const userChip = document.getElementById('user-chip');
   if (userChip) {
-    userChip.textContent = `${state.user.full_name || state.user.username} · ${roleLabel(state.user.role)}`;
+    userChip.textContent = `${displayName} · ${roleName}`;
+  }
+
+  // Sidebar foydalanuvchi ma'lumotlarini yangilash
+  const userNameEl = document.getElementById('sidebar-user-name');
+  const userRoleEl = document.getElementById('sidebar-user-role');
+  const userAvatarEl = document.getElementById('sidebar-user-avatar');
+  if (userNameEl) userNameEl.textContent = displayName;
+  if (userRoleEl) userRoleEl.textContent = roleName;
+  if (userAvatarEl) {
+    const initials = displayName
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(w => w[0].toUpperCase())
+      .join('');
+    userAvatarEl.textContent = initials || displayName.slice(0, 2).toUpperCase() || 'U';
   }
 
   if (state.user.role === 'super_admin') {
