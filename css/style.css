@@ -529,6 +529,10 @@ input, select, textarea {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.sidebar-pwa-install-btn {
+  margin-top: var(--space-2);
+}
+
 /* Main Column */
 .main-col {
   margin-left: var(--sidebar-w);

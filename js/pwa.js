@@ -72,6 +72,7 @@ function showInstallUI() {
   const installBanner = document.getElementById('pwa-install-banner');
   const installBtnTop = document.getElementById('pwa-install-btn');
   const loginInstallBtn = document.getElementById('login-pwa-install-btn');
+  const sidebarInstallBtn = document.getElementById('sidebar-pwa-install-btn');
 
   if (installBanner) {
     // Agar foydalanuvchi ilgari "Keyinroq" deb yopmagan bo'lsa
@@ -90,6 +91,10 @@ function showInstallUI() {
   if (loginInstallBtn) {
     loginInstallBtn.classList.remove('hidden');
   }
+
+  if (sidebarInstallBtn) {
+    sidebarInstallBtn.classList.remove('hidden');
+  }
 }
 
 // O'rnatish interfeysini yashirish
@@ -97,6 +102,7 @@ function hideInstallUI() {
   const installBanner = document.getElementById('pwa-install-banner');
   const installBtnTop = document.getElementById('pwa-install-btn');
   const loginInstallBtn = document.getElementById('login-pwa-install-btn');
+  const sidebarInstallBtn = document.getElementById('sidebar-pwa-install-btn');
 
   if (installBanner) {
     installBanner.classList.add('hidden');
@@ -106,6 +112,9 @@ function hideInstallUI() {
   }
   if (loginInstallBtn) {
     loginInstallBtn.classList.add('hidden');
+  }
+  if (sidebarInstallBtn) {
+    sidebarInstallBtn.classList.add('hidden');
   }
 }
 
@@ -135,6 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const installActionBtn = document.getElementById('pwa-install-action');
   const installTopBtn = document.getElementById('pwa-install-btn');
   const loginInstallBtn = document.getElementById('login-pwa-install-btn');
+  const sidebarInstallBtn = document.getElementById('sidebar-pwa-install-btn');
   const installDismissBtn = document.getElementById('pwa-install-dismiss');
 
   if (installActionBtn) {
@@ -147,6 +157,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (loginInstallBtn) {
     loginInstallBtn.addEventListener('click', triggerPwaInstall);
+  }
+
+  if (sidebarInstallBtn) {
+    sidebarInstallBtn.addEventListener('click', triggerPwaInstall);
   }
 
   if (installDismissBtn) {
@@ -244,4 +258,3 @@ window.PWA = {
   triggerPwaInstall,
   isRunningStandalone
 };
-
