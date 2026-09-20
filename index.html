@@ -13,8 +13,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Bek Nonlari" />
-  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="shortcut icon" href="favicon.ico" type="image/x-icon" />
+  <link rel="icon" href="favicon.ico" type="image/x-icon" />
+  <link rel="icon" type="image/png" sizes="48x48" href="icons/icon-48.png" />
+  <link rel="icon" type="image/png" sizes="96x96" href="icons/icon-96.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
+  <link rel="icon" type="image/png" href="icons/logo.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
   
   <title>Bek kulchalari va nonlari — Boshqaruv Tizimi</title>
@@ -33,7 +39,7 @@
 <div id="login-screen" class="login-screen">
   <div class="login-card">
     <div class="login-brand">
-      <div class="brand-mark"><i class="fa-solid fa-wheat-awn"></i></div>
+      <div class="brand-mark"><img src="icons/logo.png" alt="Bek kulchalari va nonlari" class="login-logo-img" /></div>
       <h1>Bek kulchalari va nonlari</h1>
       <p>Nonvoyxonalar boshqaruv tizimi</p>
     </div>
@@ -82,7 +88,7 @@
 <div id="app-shell" class="app-shell hidden" style="display:none;">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
-      <span class="brand-mark"><i class="fa-solid fa-wheat-awn"></i></span>
+      <span class="brand-mark"><img src="icons/logo.png" alt="Bek Logo" class="sidebar-logo-img" /></span>
       <span class="brand-name">Bek kulchalari</span>
     </div>
     <nav class="sidebar-nav" id="nav-links"></nav>
@@ -123,7 +129,8 @@
     </div>
   </div>
   <div class="pwa-install-actions">
-    <button id="pwa-install-action" class="btn btn-primary btn-sm"><i class="fa-solid fa-download"></i> O'rnatish</button>
+    <button id="pwa-install-action" class="btn btn-primary btn-sm">
+      <i class="fa-solid fa-download"></i> O'rnatish</button>
     <button id="pwa-install-dismiss" class="btn btn-ghost btn-sm" aria-label="Yopish"><i class="fa-solid fa-xmark"></i></button>
   </div>
 </div>

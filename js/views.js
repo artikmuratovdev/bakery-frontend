@@ -131,7 +131,7 @@ const ICON_MAP = {
   '🗑️': '<i class="fa-solid fa-trash-can"></i>',
   '👁️': '<i class="fa-solid fa-eye"></i>',
   'ℹ️': '<i class="fa-solid fa-circle-info"></i>',
-  '🌾': '<i class="fa-solid fa-wheat-awn"></i>'
+  '🌾': '<img src="icons/logo.png" alt="Bek Logo" class="inline-logo-icon" />'
 };
 
 function renderIcon(icon) {

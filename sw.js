@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bek-nonlari-v3';
+const CACHE_NAME = 'bek-nonlari-v4';
 const DATA_CACHE_NAME = 'bek-nonlari-api-v1';
 
 const STATIC_ASSETS = [
@@ -10,6 +10,8 @@ const STATIC_ASSETS = [
   './js/app.js',
   './js/pwa.js',
   './manifest.json',
+  './favicon.ico',
+  './icons/logo.png',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

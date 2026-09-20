@@ -15,6 +15,7 @@
   --color-text: #292722;
   --color-text-muted: #777267;
   --color-text-subtle: #9b958a;
+  --color-brand:#b65332;
 
   --color-primary: #b65332;
   --color-primary-hover: #974326;
@@ -107,6 +108,8 @@
   --color-text: #f2efe8;
   --color-text-muted: #b5b1a7;
   --color-text-subtle: #89867d;
+
+  --color-brand: #dc7952;
 
   --color-primary: #dc7952;
   --color-primary-hover: #ed8b64;
@@ -240,8 +243,26 @@ input, select, textarea {
 .brand-mark {
   font-size: 40px;
   line-height: 1;
-  margin-bottom: var(--space-2);
-  display: inline-block;
+  margin-bottom: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-logo-img {
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  margin: 0 auto;
+  box-shadow: 0 8px 24px rgba(182, 83, 50, 0.22);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+}
+
+.login-card:hover .login-logo-img {
+  transform: scale(1.05);
+  box-shadow: 0 12px 28px rgba(182, 83, 50, 0.32);
 }
 
 .login-brand h1 {
@@ -396,8 +417,34 @@ input, select, textarea {
 }
 
 .sidebar-brand .brand-mark {
-  font-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin: 0;
+}
+
+.sidebar-logo-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+}
+
+.sidebar-brand:hover .sidebar-logo-img {
+  transform: scale(1.08);
+}
+
+.inline-logo-icon {
+  width: 1.3em;
+  height: 1.3em;
+  border-radius: 50%;
+  object-fit: cover;
+  vertical-align: -0.2em;
+  display: inline-block;
 }
 
 .sidebar-brand .brand-name {
