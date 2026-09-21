@@ -182,11 +182,27 @@ function statCard(icon, label, value, sub, colorClass) {
 }
 
 async function renderStoreDashboard(content) {
-  const data = await API.get(`/stores/${state.user.store_id}/history`);
+  const [data, ordersRes] = await Promise.all([
+    API.get(`/stores/${state.user.store_id}/history`),
+    API.get('/orders').catch(() => [])
+  ]);
+  const orders = Array.isArray(ordersRes) ? ordersRes : (ordersRes?.orders || ordersRes?.data || []);
+  const recentOrders = orders.slice(0, 5);
+
   content.innerHTML = `
-    <div class="section-head">
-      <h2>${escapeHtml(data.store.name)}</h2>
-      <p>${escapeHtml(data.store.address || '')} ${data.store.phone ? '· ' + escapeHtml(data.store.phone) : ''}</p>
+    <div class="section-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2>${escapeHtml(data.store.name)}</h2>
+        <p>${escapeHtml(data.store.address || '')} ${data.store.phone ? '· ' + escapeHtml(data.store.phone) : ''}</p>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary" id="store-new-order-top-btn">
+          <i class="fa-solid fa-plus"></i> Yangi zakaz
+        </button>
+        <a href="#/orders" class="btn btn-secondary">
+          <i class="fa-solid fa-cart-shopping"></i> Zakazlar tarixi
+        </a>
+      </div>
     </div>
     <div class="grid grid-4" style="margin-bottom:20px;">
       ${statCard('<i class="fa-solid fa-receipt"></i>', 'Jami sotuv', fmtMoney(data.summary.total_sales), '', '')}
@@ -194,6 +210,52 @@ async function renderStoreDashboard(content) {
       ${statCard('<i class="fa-solid fa-clipboard-list"></i>', 'Nasiya', fmtMoney(data.summary.total_credit), '', 'blue')}
       ${statCard('<i class="fa-solid fa-triangle-exclamation"></i>', 'Qolgan qarz', fmtMoney(data.summary.remaining_debt), '', 'red')}
     </div>
+
+    <!-- Zakazlar bo'limi -->
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <h3><i class="fa-solid fa-cart-shopping" style="color:var(--color-primary); margin-right:8px;"></i>Zakazlar</h3>
+        <button class="btn btn-primary btn-sm" id="store-dash-add-order-btn">
+          <i class="fa-solid fa-plus"></i> Yangi zakaz
+        </button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:60px;">#</th>
+              <th>Sana</th>
+              <th>Mahsulotlar</th>
+              <th>Izoh</th>
+              <th>Status</th>
+              <th style="width:80px; text-align:right;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recentOrders.length ? recentOrders.map(o => `
+              <tr>
+                <td><strong>#${o.id}</strong></td>
+                <td class="muted" style="white-space:nowrap;">${formatDateTime(o.created_at || o.createdAt)}</td>
+                <td>${formatOrderItemsSummary(o.items || o.order_items || o.OrderItems || [])}</td>
+                <td class="muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(o.note || '—')}</td>
+                <td>${orderStatusBadge(o.status)}</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-secondary btn-sm" data-order-view="${o.id}">Ko'rish</button>
+                </td>
+              </tr>
+            `).join('') : `
+              <tr class="empty-row">
+                <td colspan="6" style="text-align:center; padding:24px;">
+                  Hozircha zakazlar berilmagan.
+                  <button class="btn btn-primary btn-sm" id="store-dash-empty-order-btn" style="margin-left:8px;">+ Yangi zakaz berish</button>
+                </td>
+              </tr>
+            `}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="card" style="margin-bottom:20px;">
       <div class="card-header"><h3>Olingan mahsulotlar tarixi</h3></div>
       ${renderDistTable(data.distributions, false)}
@@ -203,6 +265,21 @@ async function renderStoreDashboard(content) {
       ${renderPaymentsTable(data.payments, false)}
     </div>
   `;
+
+  const openNewOrder = () => orderCreateModal(() => renderStoreDashboard(content));
+  const btn1 = content.querySelector('#store-new-order-top-btn');
+  const btn2 = content.querySelector('#store-dash-add-order-btn');
+  const btn3 = content.querySelector('#store-dash-empty-order-btn');
+  if (btn1) btn1.onclick = openNewOrder;
+  if (btn2) btn2.onclick = openNewOrder;
+  if (btn3) btn3.onclick = openNewOrder;
+
+  content.querySelectorAll('[data-order-view]').forEach(b => {
+    b.onclick = () => {
+      const ord = orders.find(x => String(x.id) === String(b.dataset.orderView));
+      if (ord) orderDetailModal(ord, () => renderStoreDashboard(content));
+    };
+  });
 }
 
 function renderDistTable(rows, showStore = true) {
@@ -1366,6 +1443,551 @@ async function renderOverallReport(content) {
   content.querySelector('#report-from').onchange = (e) => { state.reportFrom = e.target.value; render(); };
   content.querySelector('#report-to').onchange = (e) => { state.reportTo = e.target.value; render(); };
   content.querySelector('#clear-range').onclick = () => { state.reportFrom = ''; state.reportTo = ''; render(); };
+}
+
+/* ===================== DO'KON ZAKAZLARI (ORDERS) ===================== */
+function orderStatusBadge(status) {
+  const map = {
+    pending: { label: 'Kutilmoqda', cls: 'badge-warning' },
+    approved: { label: 'Tasdiqlandi', cls: 'badge-blue' },
+    rejected: { label: 'Rad etildi', cls: 'badge-red' },
+    completed: { label: 'Bajarildi', cls: 'badge-green' }
+  };
+  const item = map[status] || { label: status || 'Noma‘lum', cls: 'badge-muted' };
+  return `<span class="badge ${item.cls}">${item.label}</span>`;
+}
+
+function formatOrderItemsSummary(items) {
+  if (!items || !items.length) return '—';
+  return items.map(it => {
+    const name = it.product?.name || it.product_name || it.name || ('Mahsulot #' + it.product_id);
+    const qty = it.quantity || it.qty || 0;
+    return `${escapeHtml(name)} (${fmtNum(qty)} dona)`;
+  }).join(', ');
+}
+
+async function renderOrders(content) {
+  if (state.user.role === 'bakery_admin') {
+    location.hash = '#/dashboard';
+    return;
+  }
+
+  const isStore = state.user.role === 'store';
+  const isSuperAdmin = state.user.role === 'super_admin';
+
+  let rawOrders = [];
+  try {
+    rawOrders = await API.get('/orders');
+  } catch (err) {
+    content.innerHTML = `<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i> Zakazlarni yuklashda xatolik: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
+  const allOrders = Array.isArray(rawOrders) ? rawOrders : (rawOrders?.orders || rawOrders?.data || []);
+
+  let statusFilter = state.orderStatusFilter || 'all';
+  let storeFilter = state.orderStoreFilter || 'all';
+  let searchFilter = state.orderSearchFilter || '';
+
+  function getFilteredOrders() {
+    return allOrders.filter(o => {
+      if (statusFilter !== 'all' && o.status !== statusFilter) return false;
+      if (isSuperAdmin && storeFilter !== 'all' && String(o.store_id || o.store?.id) !== String(storeFilter)) return false;
+      if (searchFilter) {
+        const q = searchFilter.toLowerCase();
+        const storeName = (o.store?.name || o.store_name || '').toLowerCase();
+        const note = (o.note || '').toLowerCase();
+        const itemsStr = (o.items || o.order_items || o.OrderItems || []).map(i => i.product?.name || i.product_name || '').join(' ').toLowerCase();
+        const idStr = String(o.id);
+        if (!storeName.includes(q) && !note.includes(q) && !itemsStr.includes(q) && !idStr.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  const storeMap = {};
+  if (isSuperAdmin) {
+    allOrders.forEach(o => {
+      const sid = o.store_id || o.store?.id;
+      const sname = o.store?.name || o.store_name;
+      if (sid && sname && !storeMap[sid]) {
+        storeMap[sid] = sname;
+      }
+    });
+  }
+
+  function draw() {
+    const filtered = getFilteredOrders();
+
+    content.innerHTML = `
+      <div class="section-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2>${isStore ? "Mening zakazlarim" : "Do‘kon zakazlari"}</h2>
+          <p>${isStore ? "Nonvoyxonaga yuborilgan barcha zakazlaringiz va ularning holati" : "Do‘konlar tomonidan yuborilgan mahsulot zakazlari ro'yxati"}</p>
+        </div>
+        ${isStore ? `
+          <button class="btn btn-primary" id="open-new-order-btn">
+            <i class="fa-solid fa-plus"></i> Yangi zakaz
+          </button>
+        ` : ''}
+      </div>
+
+      <div class="filters-bar" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+        <div class="field" style="min-width:170px;">
+          <label>Status bo'yicha</label>
+          <select id="orders-status-filter">
+            <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>Barcha statuslar</option>
+            <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>Kutilmoqda (pending)</option>
+            <option value="approved" ${statusFilter === 'approved' ? 'selected' : ''}>Tasdiqlandi (approved)</option>
+            <option value="rejected" ${statusFilter === 'rejected' ? 'selected' : ''}>Rad etildi (rejected)</option>
+            <option value="completed" ${statusFilter === 'completed' ? 'selected' : ''}>Bajarildi (completed)</option>
+          </select>
+        </div>
+
+        ${isSuperAdmin && Object.keys(storeMap).length ? `
+          <div class="field" style="min-width:180px;">
+            <label>Do'kon bo'yicha</label>
+            <select id="orders-store-filter">
+              <option value="all" ${storeFilter === 'all' ? 'selected' : ''}>Barcha do'konlar</option>
+              ${Object.entries(storeMap).map(([id, name]) => `
+                <option value="${id}" ${storeFilter === id ? 'selected' : ''}>${escapeHtml(name)}</option>
+              `).join('')}
+            </select>
+          </div>
+        ` : ''}
+
+        <div class="field" style="flex:1; min-width:200px;">
+          <label>Qidirish</label>
+          <input type="text" id="orders-search-input" placeholder="Zakaz #, do'kon, mahsulot yoki izoh..." value="${escapeHtml(searchFilter)}" />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Zakazlar ro'yxati (${filtered.length})</h3>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:60px;">#</th>
+                ${isSuperAdmin ? '<th>Do‘kon</th>' : ''}
+                <th>Sana</th>
+                <th>Mahsulotlar</th>
+                <th>Izoh</th>
+                <th>Status</th>
+                <th style="width:90px; text-align:right;">Amallar</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filtered.length ? filtered.map(o => {
+                const storeName = o.store?.name || o.store_name || ('Do‘kon #' + (o.store_id || ''));
+                const createdDate = formatDateTime(o.created_at || o.createdAt);
+                const itemsSummary = formatOrderItemsSummary(o.items || o.order_items || o.OrderItems || []);
+
+                return `
+                  <tr>
+                    <td><strong>#${o.id}</strong></td>
+                    ${isSuperAdmin ? `<td><strong>${escapeHtml(storeName)}</strong></td>` : ''}
+                    <td class="muted" style="white-space:nowrap;">${createdDate}</td>
+                    <td>${itemsSummary}</td>
+                    <td class="muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(o.note || '')}">
+                      ${escapeHtml(o.note || '—')}
+                    </td>
+                    <td>${orderStatusBadge(o.status)}</td>
+                    <td style="text-align:right;">
+                      <button class="btn btn-secondary btn-sm" data-view-order="${o.id}">
+                        <i class="fa-solid fa-eye"></i> Ko'rish
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              }).join('') : `
+                <tr class="empty-row">
+                  <td colspan="${isSuperAdmin ? 7 : 6}" style="text-align:center; padding:36px 16px;">
+                    <i class="fa-solid fa-cart-shopping" style="font-size:32px; color:var(--color-text-muted); opacity:0.5; margin-bottom:12px; display:block;"></i>
+                    <p style="margin:0 0 10px 0; color:var(--color-text-muted);">Hozircha mos keladigan zakazlar topilmadi</p>
+                    ${isStore ? `<button class="btn btn-primary btn-sm" id="empty-add-order-btn">+ Yangi zakaz berish</button>` : ''}
+                  </td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    const statusSelect = content.querySelector('#orders-status-filter');
+    if (statusSelect) {
+      statusSelect.onchange = (e) => {
+        statusFilter = e.target.value;
+        state.orderStatusFilter = statusFilter;
+        draw();
+      };
+    }
+
+    const storeSelect = content.querySelector('#orders-store-filter');
+    if (storeSelect) {
+      storeSelect.onchange = (e) => {
+        storeFilter = e.target.value;
+        state.orderStoreFilter = storeFilter;
+        draw();
+      };
+    }
+
+    const searchInput = content.querySelector('#orders-search-input');
+    if (searchInput) {
+      searchInput.oninput = (e) => {
+        searchFilter = e.target.value;
+        state.orderSearchFilter = searchFilter;
+        draw();
+      };
+    }
+
+    const newBtn = content.querySelector('#open-new-order-btn');
+    if (newBtn) {
+      newBtn.onclick = () => orderCreateModal(() => renderOrders(content));
+    }
+    const emptyNewBtn = content.querySelector('#empty-add-order-btn');
+    if (emptyNewBtn) {
+      emptyNewBtn.onclick = () => orderCreateModal(() => renderOrders(content));
+    }
+
+    content.querySelectorAll('[data-view-order]').forEach(btn => {
+      btn.onclick = () => {
+        const orderId = btn.dataset.viewOrder;
+        const ord = allOrders.find(x => String(x.id) === String(orderId));
+        if (ord) {
+          orderDetailModal(ord, () => renderOrders(content));
+        }
+      };
+    });
+  }
+
+  draw();
+}
+
+async function orderCreateModal(onSuccess) {
+  let products = [];
+  try {
+    const bizId = effectiveBizId();
+    products = await API.get('/products' + qs({ business_id: bizId }));
+    if (!Array.isArray(products) || !products.length) {
+      products = await API.get('/products');
+    }
+  } catch (err) {
+    try {
+      products = await API.get('/products');
+    } catch (e) {
+      toast("Mahsulotlar ro'yxatini yuklab bo'lmadi", 'danger');
+      return;
+    }
+  }
+
+  const prodList = Array.isArray(products) ? products : (products?.products || products?.data || []);
+  const activeProducts = prodList.filter(p => p.active !== false);
+
+  if (!activeProducts.length) {
+    toast("Hozircha buyurtma uchun faol mahsulotlar mavjud emas", 'warning');
+    return;
+  }
+
+  openModal("Yangi zakaz yaratish", `
+    <form id="order-create-form">
+      <div style="margin-bottom:14px;">
+        <label style="font-weight:600; font-size:var(--text-sm); display:block; margin-bottom:6px;">Zakaz mahsulotlari</label>
+        <div class="order-items-box">
+          <div id="order-items-rows"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="add-item-row-btn" style="margin-top:10px;">
+            <i class="fa-solid fa-plus"></i> Mahsulot qo'shish
+          </button>
+        </div>
+      </div>
+
+      <div class="field span-2" style="margin-bottom:14px;">
+        <label>Izoh / Note (ixtiyoriy)</label>
+        <textarea id="f-order-note" rows="3" placeholder="Masalan: Ertalab soat 8:00 gacha kerak"></textarea>
+      </div>
+
+      <div id="order-form-error" class="form-error hidden" style="margin-bottom:14px;"></div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="order-cancel-btn">Bekor qilish</button>
+        <button type="submit" class="btn btn-primary" id="order-submit-btn">
+          <i class="fa-solid fa-paper-plane"></i> Zakazni yuborish
+        </button>
+      </div>
+    </form>
+  `, (m) => {
+    const rowsContainer = m.querySelector('#order-items-rows');
+    const addRowBtn = m.querySelector('#add-item-row-btn');
+    const cancelBtn = m.querySelector('#order-cancel-btn');
+    const form = m.querySelector('#order-create-form');
+    const errorEl = m.querySelector('#order-form-error');
+    const submitBtn = m.querySelector('#order-submit-btn');
+
+    cancelBtn.onclick = () => m.remove();
+
+    function createRow(selectedProdId = '', initialQty = 1) {
+      const row = document.createElement('div');
+      row.className = 'order-item-row';
+      row.innerHTML = `
+        <div class="field field-prod">
+          <label>Mahsulot</label>
+          <select class="item-product-select" required>
+            <option value="">-- Mahsulotni tanlang --</option>
+            ${activeProducts.map(p => `
+              <option value="${p.id}" ${String(p.id) === String(selectedProdId) ? 'selected' : ''}>
+                ${escapeHtml(p.name)} ${p.price ? `(${fmtMoney(p.price)})` : ''}
+              </option>
+            `).join('')}
+          </select>
+        </div>
+        <div class="field field-qty">
+          <label>Miqdor (dona)</label>
+          <input type="number" class="item-qty-input" min="1" step="1" value="${initialQty}" required />
+        </div>
+        <div class="field-remove">
+          <button type="button" class="icon-btn remove-row-btn" title="O'chirish" style="color:var(--color-danger); margin-bottom:2px;">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      `;
+
+      row.querySelector('.remove-row-btn').onclick = () => {
+        if (rowsContainer.querySelectorAll('.order-item-row').length <= 1) {
+          toast("Kamida bitta mahsulot bo'lishi shart", 'warning');
+          return;
+        }
+        row.remove();
+      };
+
+      rowsContainer.appendChild(row);
+    }
+
+    createRow();
+
+    addRowBtn.onclick = () => {
+      createRow();
+    };
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      errorEl.classList.add('hidden');
+      errorEl.textContent = '';
+
+      const rows = rowsContainer.querySelectorAll('.order-item-row');
+      if (!rows.length) {
+        errorEl.textContent = "Kamida bitta mahsulot qo'shing";
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      const items = [];
+      const selectedProductIds = new Set();
+
+      for (const r of rows) {
+        const prodSelect = r.querySelector('.item-product-select');
+        const qtyInput = r.querySelector('.item-qty-input');
+        const prodId = Number(prodSelect.value);
+        const qty = parseInt(qtyInput.value, 10);
+
+        if (!prodId) {
+          errorEl.textContent = "Barcha qatorlarda mahsulot tanlanishi kerak";
+          errorEl.classList.remove('hidden');
+          prodSelect.focus();
+          return;
+        }
+
+        if (isNaN(qty) || qty <= 0) {
+          errorEl.textContent = "Miqdor 0 dan katta butun son bo'lishi kerak";
+          errorEl.classList.remove('hidden');
+          qtyInput.focus();
+          return;
+        }
+
+        if (selectedProductIds.has(prodId)) {
+          errorEl.textContent = "Bir xil mahsulotni zakazga ikki marta qo'shish mumkin emas";
+          errorEl.classList.remove('hidden');
+          prodSelect.focus();
+          return;
+        }
+
+        selectedProductIds.add(prodId);
+        items.push({
+          product_id: prodId,
+          quantity: qty
+        });
+      }
+
+      const note = m.querySelector('#f-order-note').value.trim();
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Yuborilmoqda...`;
+
+      try {
+        await API.post('/orders', {
+          items,
+          note: note || undefined
+        });
+
+        toast("Zakaz muvaffaqiyatli yuborildi!", 'success');
+        m.remove();
+        if (onSuccess) onSuccess();
+      } catch (err) {
+        errorEl.textContent = err.message || "Zakaz yuborishda xatolik yuz berdi";
+        errorEl.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `<i class="fa-solid fa-paper-plane"></i> Zakazni yuborish`;
+      }
+    };
+  });
+}
+
+function orderDetailModal(order, onUpdate) {
+  const isSuperAdmin = state.user.role === 'super_admin';
+  const items = order.items || order.order_items || order.OrderItems || [];
+  const storeName = order.store?.name || order.store_name || ('Do‘kon #' + (order.store_id || ''));
+  const storePhone = order.store?.phone || '';
+  const storeAddress = order.store?.address || '';
+
+  let totalAmount = 0;
+  items.forEach(it => {
+    const qty = it.quantity || it.qty || 0;
+    const price = it.product?.price || it.price || 0;
+    totalAmount += qty * price;
+  });
+
+  openModal(`Zakaz #${order.id}`, `
+    <div class="order-details-grid">
+      <div>
+        <span class="muted" style="font-size:11.5px; display:block;">Do‘kon:</span>
+        <strong>${escapeHtml(storeName)}</strong>
+        ${storePhone ? `<div class="muted" style="font-size:12px;">Tel: ${escapeHtml(storePhone)}</div>` : ''}
+        ${storeAddress ? `<div class="muted" style="font-size:12px;">${escapeHtml(storeAddress)}</div>` : ''}
+      </div>
+      <div>
+        <span class="muted" style="font-size:11.5px; display:block;">Yaratilgan sana:</span>
+        <div>${formatDateTime(order.created_at || order.createdAt)}</div>
+        <div style="margin-top:6px;"><span class="muted" style="font-size:11.5px; margin-right:4px;">Holati:</span> ${orderStatusBadge(order.status)}</div>
+      </div>
+      <div style="grid-column: 1 / -1;">
+        <span class="muted" style="font-size:11.5px; display:block;">Izoh / Note:</span>
+        <div style="margin-top:2px;">${escapeHtml(order.note || 'Izoh qoldirilmagan')}</div>
+      </div>
+    </div>
+
+    <h4 style="margin:16px 0 8px 0; font-size:var(--text-sm);">Buyurtma qilingan mahsulotlar</h4>
+    <div class="table-wrap" style="margin-bottom:16px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Mahsulot</th>
+            <th class="text-right">Miqdor</th>
+            <th class="text-right">Narxi</th>
+            <th class="text-right">Jami summa</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.length ? items.map(it => {
+            const name = it.product?.name || it.product_name || it.name || ('Mahsulot #' + it.product_id);
+            const qty = it.quantity || it.qty || 0;
+            const price = it.product?.price || it.price || 0;
+            const sum = qty * price;
+            return `
+              <tr>
+                <td><strong>${escapeHtml(name)}</strong></td>
+                <td class="text-right num">${fmtNum(qty)} dona</td>
+                <td class="text-right num">${price ? fmtMoney(price) : '—'}</td>
+                <td class="text-right num">${sum ? fmtMoney(sum) : '—'}</td>
+              </tr>
+            `;
+          }).join('') : `<tr class="empty-row"><td colspan="4">Mahsulotlar ro'yxati bo'sh</td></tr>`}
+        </tbody>
+        ${totalAmount > 0 ? `
+          <tfoot>
+            <tr>
+              <th colspan="3" style="text-align:right;">Umumiy summa:</th>
+              <th class="text-right num">${fmtMoney(totalAmount)}</th>
+            </tr>
+          </tfoot>
+        ` : ''}
+      </table>
+    </div>
+
+    ${isSuperAdmin ? `
+      <div style="background:var(--color-surface-muted); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:14px; margin-bottom:14px;">
+        <label style="font-weight:600; font-size:var(--text-sm); display:block; margin-bottom:8px;">
+          Zakaz statusini o'zgartirish
+        </label>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <select id="modal-order-status" style="flex:1; min-width:180px; height:38px;">
+            <option value="pending" ${order.status === 'pending' ? 'selected' : ''}>Kutilmoqda (pending)</option>
+            <option value="approved" ${order.status === 'approved' ? 'selected' : ''}>Tasdiqlandi (approved)</option>
+            <option value="rejected" ${order.status === 'rejected' ? 'selected' : ''}>Rad etildi (rejected)</option>
+            <option value="completed" ${order.status === 'completed' ? 'selected' : ''}>Bajarildi (completed)</option>
+          </select>
+          <button class="btn btn-primary" id="save-status-btn">
+            <i class="fa-solid fa-check"></i> Statusni saqlash
+          </button>
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="form-actions">
+      <button class="btn btn-secondary" id="modal-close-order-btn">Yopish</button>
+    </div>
+  `, (m) => {
+    m.querySelector('#modal-close-order-btn').onclick = () => m.remove();
+
+    if (isSuperAdmin) {
+      const saveBtn = m.querySelector('#save-status-btn');
+      const statusSelect = m.querySelector('#modal-order-status');
+
+      saveBtn.onclick = async () => {
+        const newStatus = statusSelect.value;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
+
+        try {
+          await API.patch(`/orders/${order.id}/status`, {
+            status: newStatus
+          });
+          toast("Zakaz statusi muvaffaqiyatli o'zgartirildi", 'success');
+          m.remove();
+          if (onUpdate) onUpdate();
+        } catch (err) {
+          toast(err.message || "Statusni o'zgartirishda xatolik", 'danger');
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = `<i class="fa-solid fa-check"></i> Statusni saqlash`;
+        }
+      };
+    }
+  });
+}
+
+async function openOrderDetailsById(orderId) {
+  try {
+    let order = null;
+    try {
+      order = await API.get(`/orders/${orderId}`);
+    } catch (e) {
+      const all = await API.get('/orders');
+      const list = Array.isArray(all) ? all : (all?.orders || all?.data || []);
+      order = list.find(o => String(o.id) === String(orderId));
+    }
+    if (order) {
+      orderDetailModal(order, () => {
+        if (location.hash === '#/orders') render();
+      });
+    } else {
+      toast("Zakaz topilmadi", 'warning');
+    }
+  } catch (err) {
+    toast(err.message || "Zakaz ma'lumotlarini yuklab bo'lmadi", 'danger');
+  }
 }
 
 

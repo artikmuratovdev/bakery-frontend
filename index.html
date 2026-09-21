@@ -128,6 +128,25 @@
       <div class="topbar-right">
         <div id="sync-status" class="sync-status-pill hidden" title="Ma'lumotlar holati"></div>
         <div class="business-switcher" id="business-switcher"></div>
+        <!-- Bildirishnomalar markazi (faqat super_admin uchun ko'rsatiladi) -->
+        <div id="notif-wrapper" class="notif-wrapper hidden">
+          <button id="notif-bell-btn" class="notif-bell-btn" aria-label="Bildirishnomalar" title="Yangi zakazlar">
+            <i class="fa-solid fa-bell"></i>
+            <span id="notif-badge" class="notif-badge hidden">0</span>
+          </button>
+          <div id="notif-dropdown" class="notif-dropdown hidden">
+            <div class="notif-header">
+              <span class="notif-header-title"><i class="fa-solid fa-bell"></i> Bildirishnomalar</span>
+              <button id="notif-mark-all-btn" class="btn btn-secondary btn-sm" style="font-size:11.5px; padding:3px 8px;">Hammasini o'qish</button>
+            </div>
+            <div id="notif-list" class="notif-list">
+              <div class="notif-empty"><i class="fa-solid fa-check" style="font-size:24px; color:var(--color-green); margin-bottom:6px; display:block;"></i>Yangi zakazlar yo'q</div>
+            </div>
+            <div class="notif-footer">
+              <a href="#/orders" id="notif-view-all">Barcha zakazlarni ko'rish &rarr;</a>
+            </div>
+          </div>
+        </div>
         <div class="user-chip" id="user-chip"></div>
       </div>
     </header>

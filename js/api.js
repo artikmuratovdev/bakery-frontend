@@ -1,5 +1,5 @@
-const API_BASE ="https://bakery-system-q9nt.onrender.com/api";
-// const API_BASE ="http://localhost:5000/api";
+// const API_BASE ="https://bakery-system-q9nt.onrender.com/api";
+const API_BASE ="http://localhost:5000/api";
 
 function parseBackendError(data, res, rawText) {
   if (data) {
@@ -343,6 +343,8 @@ const API = {
       ApiCache.invalidate('/reports');
     } else if (url.includes('/users')) {
       ApiCache.invalidate('/users');
+    } else if (url.includes('/orders')) {
+      ApiCache.invalidate('/orders');
     } else {
       ApiCache.invalidate(url);
     }
@@ -429,6 +431,7 @@ const API = {
 
   post(url, body) { return this.request('POST', url, body); },
   put(url, body) { return this.request('PUT', url, body); },
+  patch(url, body) { return this.request('PATCH', url, body); },
   del(url) { return this.request('DELETE', url); }
 };
 
@@ -456,6 +459,33 @@ function fmtDate(d) {
   if (!d) return '';
   const [y, m, day] = d.split('-');
   return `${day}.${m}.${y}`;
+}
+
+function formatDateTime(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return String(isoStr);
+  const pad = (n) => String(n).padStart(2, '0');
+  const day = pad(d.getDate());
+  const mon = pad(d.getMonth() + 1);
+  const yr = d.getFullYear();
+  const hr = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${day}.${mon}.${yr} ${hr}:${min}`;
+}
+
+function formatTimeAgo(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return '';
+  const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (sec < 60) return 'Hozirgina';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} daqiqa oldin`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} soat oldin`;
+  const days = Math.floor(hr / 24);
+  return `${days} kun oldin`;
 }
 
 function escapeHtml(s) {

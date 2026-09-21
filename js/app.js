@@ -139,6 +139,7 @@ function hasCachedDataForRoute(route) {
     return ApiCache.has('/stores' + qs({ business_id: bizId }));
   }
   if (view === 'production') return ApiCache.hasMatch('/production');
+  if (view === 'orders') return ApiCache.hasMatch('/orders');
   if (view === 'distribution') return ApiCache.hasMatch('/distribution');
   if (view === 'payments') return ApiCache.hasMatch('/payments') || ApiCache.hasMatch('/stores');
   if (view === 'reports') return ApiCache.hasMatch('/reports');
@@ -263,6 +264,7 @@ async function onLogout() {
   try {
     await API.post('/auth/logout');
   } catch (e) { /* ignore */ }
+  cleanupNotificationCenter();
   API.removeToken();
   ApiCache.clear();
   state.user = null;
@@ -310,6 +312,7 @@ async function afterLogin() {
     state.currentBusinessId = state.user.business_id;
   }
 
+  initNotificationCenter();
   renderBusinessSwitcher();
   renderNav();
   state.route = location.hash && location.hash !== '#/' ? location.hash : '#/dashboard';
@@ -352,6 +355,7 @@ const NAV_ITEMS = {
       { href: '#/stores', label: "Do‘konlar", icon: '<i class="fa-solid fa-store"></i>' },
     ]},
     { group: 'Amaliyot', items: [
+      { href: '#/orders', label: 'Do‘kon zakazlari', icon: '<i class="fa-solid fa-clipboard-check"></i>' },
       { href: '#/production', label: 'Ishlab chiqarish', icon: '<i class="fa-solid fa-kitchen-set"></i>' },
       { href: '#/distribution', label: 'Taqsimlash', icon: '<i class="fa-solid fa-truck-fast"></i>' },
       { href: '#/payments', label: 'Naqd / Nasiya', icon: '<i class="fa-solid fa-wallet"></i>' },
@@ -376,6 +380,7 @@ const NAV_ITEMS = {
   store: [
     { group: 'Umumiy', items: [
       { href: '#/dashboard', label: 'Mening do‘konim', icon: '<i class="fa-solid fa-store"></i>' },
+      { href: '#/orders', label: 'Zakazlar', icon: '<i class="fa-solid fa-cart-shopping"></i>' },
     ]},
   ]
 };
@@ -421,7 +426,7 @@ async function render(isRevalidating = false) {
 
   const [, view, param] = state.route.split('/');
 
-  if (state.user?.role === 'bakery_admin' && (view === 'products' || view === 'stores' || view === 'distribution' || view === 'payments')) {
+  if (state.user?.role === 'bakery_admin' && (view === 'products' || view === 'stores' || view === 'distribution' || view === 'payments' || view === 'orders')) {
     location.hash = '#/dashboard';
     return;
   }
@@ -431,6 +436,7 @@ async function render(isRevalidating = false) {
     businesses: 'Nonvoyxonalar',
     products: 'Mahsulotlar',
     stores: "Do‘konlar",
+    orders: state.user?.role === 'store' ? 'Mening zakazlarim' : 'Do‘kon zakazlari',
     production: 'Ishlab chiqarish',
     distribution: 'Taqsimlash',
     payments: 'Naqd / Nasiya hisob-kitobi',
@@ -445,6 +451,7 @@ async function render(isRevalidating = false) {
     else if (view === 'products') await renderProducts(content);
     else if (view === 'stores' && !param) await renderStores(content);
     else if (view === 'stores' && param) await renderStoreDetail(content, param);
+    else if (view === 'orders') await renderOrders(content);
     else if (view === 'production') await renderProduction(content);
     else if (view === 'distribution') await renderDistribution(content);
     else if (view === 'payments') await renderPayments(content);
@@ -458,6 +465,194 @@ async function render(isRevalidating = false) {
       console.warn('[Revalidate] Sahifani yangilashda xatolik:', e);
     }
   }
+}
+
+/* ===================== Notification Center (faqat super_admin) ===================== */
+let notifPollTimer = null;
+let currentNotifications = [];
+
+function initNotificationCenter() {
+  const wrapper = document.getElementById('notif-wrapper');
+  if (!wrapper) return;
+
+  // Faqat super_admin uchun ko'rsatiladi
+  if (state.user?.role !== 'super_admin') {
+    cleanupNotificationCenter();
+    return;
+  }
+
+  wrapper.classList.remove('hidden');
+
+  const bellBtn = document.getElementById('notif-bell-btn');
+  const dropdown = document.getElementById('notif-dropdown');
+  const markAllBtn = document.getElementById('notif-mark-all-btn');
+  const viewAllLink = document.getElementById('notif-view-all');
+
+  if (bellBtn && dropdown) {
+    bellBtn.onclick = (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle('hidden');
+    };
+
+    if (!document._notifClickListener) {
+      document._notifClickListener = (e) => {
+        const dd = document.getElementById('notif-dropdown');
+        const wrp = document.getElementById('notif-wrapper');
+        if (dd && wrp && !wrp.contains(e.target)) {
+          dd.classList.add('hidden');
+        }
+      };
+      document.addEventListener('click', document._notifClickListener);
+    }
+  }
+
+  if (markAllBtn) {
+    markAllBtn.onclick = async (e) => {
+      e.stopPropagation();
+      await markAllNotificationsAsRead();
+    };
+  }
+
+  if (viewAllLink) {
+    viewAllLink.onclick = () => {
+      if (dropdown) dropdown.classList.add('hidden');
+    };
+  }
+
+  fetchNotifications();
+  startNotificationPolling();
+}
+
+function cleanupNotificationCenter() {
+  stopNotificationPolling();
+  const wrapper = document.getElementById('notif-wrapper');
+  if (wrapper) wrapper.classList.add('hidden');
+  const dropdown = document.getElementById('notif-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+  currentNotifications = [];
+}
+
+function startNotificationPolling() {
+  stopNotificationPolling();
+  // 25 soniyada bir marta polling orqali yangilab turish (WebSocket bo'lmaganda)
+  notifPollTimer = setInterval(() => {
+    if (state.user?.role === 'super_admin') {
+      fetchNotifications(true);
+    } else {
+      cleanupNotificationCenter();
+    }
+  }, 25000);
+}
+
+function stopNotificationPolling() {
+  if (notifPollTimer) {
+    clearInterval(notifPollTimer);
+    notifPollTimer = null;
+  }
+}
+
+async function fetchNotifications(isPoll = false) {
+  if (state.user?.role !== 'super_admin') return;
+  try {
+    const list = await API.get('/orders/notifications?unread=true', { bypassCache: true });
+    currentNotifications = Array.isArray(list) ? list : (list?.notifications || list?.data || []);
+    renderNotificationsUI();
+  } catch (err) {
+    if (!isPoll) {
+      console.warn('[Notifications] Yuklashda xatolik:', err);
+    }
+  }
+}
+
+function renderNotificationsUI() {
+  const badge = document.getElementById('notif-badge');
+  const listEl = document.getElementById('notif-list');
+  if (!badge || !listEl) return;
+
+  const unreadCount = currentNotifications.length;
+  if (unreadCount > 0) {
+    badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+
+  if (unreadCount === 0) {
+    listEl.innerHTML = `
+      <div class="notif-empty">
+        <i class="fa-solid fa-circle-check" style="font-size:24px; color:var(--color-green); margin-bottom:6px; display:block;"></i>
+        Yangi zakazlar yo'q
+      </div>`;
+    return;
+  }
+
+  listEl.innerHTML = currentNotifications.map(n => {
+    const storeName = n.store_name || n.store?.name || n.order?.store?.name || 'Do‘kon';
+    const timeStr = formatTimeAgo(n.created_at || n.createdAt);
+    const orderId = n.order_id || n.orderId || n.order?.id;
+    const summary = n.message || n.text || (n.order?.items ? `${n.order.items.length} xil mahsulot` : 'Yangi do‘kon zakazi');
+
+    return `
+      <div class="notif-item unread" data-id="${n.id}" data-order-id="${orderId || ''}">
+        <div class="notif-item-title">
+          <span><i class="fa-solid fa-cart-shopping" style="color:var(--color-primary); margin-right:6px;"></i>Yangi do‘kon zakazi</span>
+          ${orderId ? `<span class="badge badge-accent">#${orderId}</span>` : ''}
+        </div>
+        <div style="font-weight:600; font-size:12.5px; color:var(--color-text);">${escapeHtml(storeName)}</div>
+        <div class="notif-item-desc">${escapeHtml(summary)}</div>
+        <div class="notif-item-time"><i class="fa-regular fa-clock"></i> ${timeStr}</div>
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.notif-item').forEach(item => {
+    item.onclick = async () => {
+      const notifId = item.dataset.id;
+      const orderId = item.dataset.orderId;
+      const dropdown = document.getElementById('notif-dropdown');
+      if (dropdown) dropdown.classList.add('hidden');
+
+      try {
+        await API.patch(`/orders/notifications/${notifId}/read`);
+      } catch (e) {
+        console.warn('[Notification read err]', e);
+      }
+
+      currentNotifications = currentNotifications.filter(x => String(x.id) !== String(notifId));
+      renderNotificationsUI();
+
+      if (orderId) {
+        if (location.hash === '#/orders') {
+          if (typeof openOrderDetailsById === 'function') {
+            openOrderDetailsById(orderId);
+          }
+        } else {
+          location.hash = '#/orders';
+          setTimeout(() => {
+            if (typeof openOrderDetailsById === 'function') {
+              openOrderDetailsById(orderId);
+            }
+          }, 350);
+        }
+      } else {
+        location.hash = '#/orders';
+      }
+    };
+  });
+}
+
+async function markAllNotificationsAsRead() {
+  if (!currentNotifications.length) return;
+  const unread = [...currentNotifications];
+  currentNotifications = [];
+  renderNotificationsUI();
+
+  for (const n of unread) {
+    try {
+      await API.patch(`/orders/notifications/${n.id}/read`);
+    } catch (e) { /* ignore */ }
+  }
+  toast("Barcha bildirishnomalar o'qildi", 'success');
 }
 
 document.addEventListener('DOMContentLoaded', boot);
