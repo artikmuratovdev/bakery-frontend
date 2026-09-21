@@ -341,10 +341,12 @@ const API = {
       ApiCache.invalidate('/stores');
       ApiCache.invalidate('/dashboard/summary');
       ApiCache.invalidate('/reports');
-    } else if (url.includes('/users')) {
+    } else if (url.includes('/users') || url.includes('/delivery-assignments')) {
       ApiCache.invalidate('/users');
-    } else if (url.includes('/orders')) {
+      ApiCache.invalidate('/delivery-assignments');
+    } else if (url.includes('/orders') || url.includes('/deliveries')) {
       ApiCache.invalidate('/orders');
+      ApiCache.invalidate('/deliveries');
     } else {
       ApiCache.invalidate(url);
     }

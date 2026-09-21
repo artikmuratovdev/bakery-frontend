@@ -140,6 +140,8 @@ function hasCachedDataForRoute(route) {
   }
   if (view === 'production') return ApiCache.hasMatch('/production');
   if (view === 'orders') return ApiCache.hasMatch('/orders');
+  if (view === 'delivery') return ApiCache.hasMatch('/deliveries');
+  if (view === 'drivers') return ApiCache.hasMatch('/delivery-assignments') || ApiCache.hasMatch('/users');
   if (view === 'distribution') return ApiCache.hasMatch('/distribution');
   if (view === 'payments') return ApiCache.hasMatch('/payments') || ApiCache.hasMatch('/stores');
   if (view === 'reports') return ApiCache.hasMatch('/reports');
@@ -265,6 +267,7 @@ async function onLogout() {
     await API.post('/auth/logout');
   } catch (e) { /* ignore */ }
   cleanupNotificationCenter();
+  if (typeof stopDeliveryPolling === 'function') stopDeliveryPolling();
   API.removeToken();
   ApiCache.clear();
   state.user = null;
@@ -319,8 +322,18 @@ async function afterLogin() {
   render();
 }
 
+function isDeliveryUser() {
+  return state.user?.role === 'delivery' || state.user?.role === 'dostavkachi';
+}
+
 function roleLabel(role) {
-  return { super_admin: 'Super Admin', bakery_admin: 'Nonvoyxona Admini', store: "Do‘kon" }[role] || role;
+  return {
+    super_admin: 'Super Admin',
+    bakery_admin: 'Nonvoyxona Admini',
+    store: "Do‘kon",
+    delivery: "Dostavkachi",
+    dostavkachi: "Dostavkachi"
+  }[role] || role;
 }
 
 function renderBusinessSwitcher() {
@@ -353,6 +366,7 @@ const NAV_ITEMS = {
       { href: '#/businesses', label: 'Nonvoyxonalar', icon: '<i class="fa-solid fa-industry"></i>' },
       { href: '#/products', label: 'Mahsulotlar', icon: '<i class="fa-solid fa-bread-slice"></i>' },
       { href: '#/stores', label: "Do‘konlar", icon: '<i class="fa-solid fa-store"></i>' },
+      { href: '#/drivers', label: 'Haydovchilar', icon: '<i class="fa-solid fa-id-card"></i>' },
     ]},
     { group: 'Amaliyot', items: [
       { href: '#/orders', label: 'Do‘kon zakazlari', icon: '<i class="fa-solid fa-clipboard-check"></i>' },
@@ -369,6 +383,9 @@ const NAV_ITEMS = {
     { group: 'Umumiy', items: [
       { href: '#/dashboard', label: 'Boshqaruv paneli', icon: '<i class="fa-solid fa-chart-pie"></i>' }
     ]},
+    { group: 'Boshqaruv', items: [
+      { href: '#/drivers', label: 'Haydovchilar', icon: '<i class="fa-solid fa-id-card"></i>' }
+    ]},
     { group: 'Amaliyot', items: [
       { href: '#/production', label: 'Ishlab chiqarish', icon: '<i class="fa-solid fa-kitchen-set"></i>' },
     ]},
@@ -382,6 +399,18 @@ const NAV_ITEMS = {
       { href: '#/dashboard', label: 'Mening do‘konim', icon: '<i class="fa-solid fa-store"></i>' },
       { href: '#/orders', label: 'Zakazlar', icon: '<i class="fa-solid fa-cart-shopping"></i>' },
     ]},
+  ],
+  delivery: [
+    { group: 'Yetkazib berish', items: [
+      { href: '#/dashboard', label: 'Tasdiqlangan zakazlar', icon: '<i class="fa-solid fa-truck-fast"></i>' },
+      { href: '#/delivery/history', label: 'Yetkazilganlar', icon: '<i class="fa-solid fa-clock-rotate-left"></i>' }
+    ]}
+  ],
+  dostavkachi: [
+    { group: 'Yetkazib berish', items: [
+      { href: '#/dashboard', label: 'Tasdiqlangan zakazlar', icon: '<i class="fa-solid fa-truck-fast"></i>' },
+      { href: '#/delivery/history', label: 'Yetkazilganlar', icon: '<i class="fa-solid fa-clock-rotate-left"></i>' }
+    ]}
   ]
 };
 
@@ -426,13 +455,37 @@ async function render(isRevalidating = false) {
 
   const [, view, param] = state.route.split('/');
 
+  if (view !== 'dashboard' && view !== 'delivery') {
+    if (typeof stopDeliveryPolling === 'function') stopDeliveryPolling();
+  }
+
+  // Ruxsatlar (Role guards)
+  if (isDeliveryUser()) {
+    if (view !== 'dashboard' && view !== 'delivery') {
+      location.hash = '#/dashboard';
+      return;
+    }
+  } else {
+    if (view === 'delivery') {
+      location.hash = '#/dashboard';
+      return;
+    }
+  }
+
   if (state.user?.role === 'bakery_admin' && (view === 'products' || view === 'stores' || view === 'distribution' || view === 'payments' || view === 'orders')) {
     location.hash = '#/dashboard';
     return;
   }
 
+  if (view === 'drivers' && state.user?.role !== 'super_admin' && state.user?.role !== 'bakery_admin') {
+    location.hash = '#/dashboard';
+    return;
+  }
+
   const titleMap = {
-    dashboard: 'Boshqaruv paneli',
+    dashboard: isDeliveryUser() ? 'Yetkazib berish paneli' : 'Boshqaruv paneli',
+    delivery: 'Yetkazilgan zakazlar',
+    drivers: 'Haydovchilar boshqaruvi',
     businesses: 'Nonvoyxonalar',
     products: 'Mahsulotlar',
     stores: "Do‘konlar",
@@ -447,6 +500,9 @@ async function render(isRevalidating = false) {
 
   try {
     if (view === 'dashboard' || !view) await renderDashboard(content);
+    else if (view === 'delivery' && param === 'history') await renderDeliveryDashboard(content, 'history');
+    else if (view === 'delivery') await renderDeliveryDashboard(content, 'active');
+    else if (view === 'drivers') await renderDrivers(content);
     else if (view === 'businesses') await renderBusinesses(content);
     else if (view === 'products') await renderProducts(content);
     else if (view === 'stores' && !param) await renderStores(content);

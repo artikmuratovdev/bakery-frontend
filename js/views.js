@@ -50,6 +50,7 @@ function effectiveBizId() {
 /* ===================== DASHBOARD ===================== */
 async function renderDashboard(content) {
   if (state.user.role === 'store') return renderStoreDashboard(content);
+  if (isDeliveryUser()) return renderDeliveryDashboard(content, 'active');
 
   const bizId = effectiveBizId();
   const summary = await API.get('/dashboard/summary' + qs({ business_id: bizId }));
@@ -1990,4 +1991,1304 @@ async function openOrderDetailsById(orderId) {
   }
 }
 
+/* ===================== YETKAZIB BERISH (DELIVERY / DOSTAVKACHI) ===================== */
+let deliveryPollTimer = null;
 
+function stopDeliveryPolling() {
+  if (deliveryPollTimer) {
+    clearInterval(deliveryPollTimer);
+    deliveryPollTimer = null;
+  }
+}
+
+function getItemDeliveryStats(item) {
+  let delivered = 0;
+  let deliveryDate = null;
+
+  if (typeof item.delivered_quantity === 'number') {
+    delivered = item.delivered_quantity;
+  } else if (typeof item.delivered_qty === 'number') {
+    delivered = item.delivered_qty;
+  } else if (typeof item.delivered === 'number') {
+    delivered = item.delivered;
+  } else if (Array.isArray(item.deliveries) && item.deliveries.length) {
+    delivered = item.deliveries.reduce((sum, d) => sum + (Number(d.quantity) || 0), 0);
+    deliveryDate = item.deliveries[0]?.created_at || item.deliveries[0]?.createdAt;
+  }
+
+  if (!deliveryDate) {
+    deliveryDate = item.delivery_date || item.delivered_at || item.updated_at || item.updatedAt;
+  }
+
+  const ordered = Number(item.quantity) || 0;
+  const remaining = Math.max(0, ordered - delivered);
+  const isDelivered = delivered >= ordered && ordered > 0;
+
+  return {
+    ordered,
+    delivered,
+    remaining,
+    isDelivered,
+    deliveryDate
+  };
+}
+
+async function renderDeliveryDashboard(content, currentTab = 'active') {
+  // Xavfsizlik: faqat delivery yoki dostavkachi roli uchun
+  if (!isDeliveryUser()) {
+    location.hash = '#/dashboard';
+    return;
+  }
+
+  content.innerHTML = `
+    <div style="padding: 40px 0; text-align: center; color: var(--color-text-muted);">
+      <div style="font-size: 28px; margin-bottom: 12px; color: var(--color-primary);"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
+      <div>Zakazlar yuklanmoqda...</div>
+    </div>
+  `;
+
+  let activeTab = currentTab === 'history' ? 'history' : 'active';
+  let searchQuery = '';
+  let selectedStatus = ''; // '' = barchasi (approved + completed), 'approved', 'completed', 'delivered'
+  let ordersList = [];
+
+  async function loadData(isBackground = false) {
+    try {
+      let endpoint = '/deliveries/orders';
+      if (selectedStatus) {
+        endpoint += `?status=${encodeURIComponent(selectedStatus)}`;
+      }
+      const res = await API.get(endpoint, { bypassCache: true });
+      const raw = Array.isArray(res) ? res : (res?.orders || res?.data || []);
+      
+      // pending va rejected zakazlar ko‘rinmaydi!
+      // Faqat approved, completed va delivered zakazlar qabul qilinadi
+      ordersList = raw.filter(o => o.status !== 'pending' && o.status !== 'rejected');
+      renderUI();
+    } catch (err) {
+      if (!isBackground) {
+        content.innerHTML = `
+          <div class="alert alert-warning" style="margin-top:20px;">
+            <i class="fa-solid fa-triangle-exclamation"></i> Zakazlarni yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+          </div>
+        `;
+      }
+    }
+  }
+
+  function renderUI() {
+    // Zakazlarni ajratish:
+    const activeOrders = [];
+    const historyOrders = [];
+
+    let totalRemainingQty = 0;
+    let totalDeliveredQty = 0;
+
+    ordersList.forEach(order => {
+      const items = order.items || order.order_items || order.OrderItems || [];
+      let orderHasRemaining = false;
+
+      items.forEach(it => {
+        const stats = getItemDeliveryStats(it);
+        totalRemainingQty += stats.remaining;
+        totalDeliveredQty += stats.delivered;
+        if (stats.remaining > 0) {
+          orderHasRemaining = true;
+        }
+      });
+
+      const isDone = order.status === 'completed' || order.status === 'delivered';
+
+      // Faol zakazlar: statusi approved bo'lgan va hali berilishi kerak bo'lgan zakazlar
+      if (!isDone && order.status === 'approved' && (orderHasRemaining || items.length === 0)) {
+        activeOrders.push(order);
+      } else {
+        // Tarix / Yetkazilganlar: statusi completed, delivered yoki barcha mahsulotlari to'liq berilgan zakazlar
+        historyOrders.push(order);
+      }
+    });
+
+    // Tartiblash (sana bo'yicha eng yangisi birinchi)
+    activeOrders.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
+    historyOrders.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
+
+    let currentList = [];
+    if (selectedStatus === 'approved') {
+      currentList = activeOrders;
+    } else if (selectedStatus === 'completed' || selectedStatus === 'delivered') {
+      currentList = historyOrders;
+    } else {
+      currentList = activeTab === 'active' ? activeOrders : historyOrders;
+    }
+
+    // Qidiruv bo'yicha filtrlash
+    const filteredOrders = currentList.filter(o => {
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      const storeName = (o.store?.name || o.store_name || '').toLowerCase();
+      const storeAddr = (o.store?.address || o.store_address || '').toLowerCase();
+      const storePhone = (o.store?.phone || o.store_phone || '').toLowerCase();
+      const note = (o.note || '').toLowerCase();
+      const idStr = String(o.id);
+      return storeName.includes(q) || storeAddr.includes(q) || storePhone.includes(q) || note.includes(q) || idStr.includes(q);
+    });
+
+    content.innerHTML = `
+      <!-- Quick Summary Stat Cards -->
+      <div class="grid grid-3" style="margin-bottom:20px;">
+        ${statCard('<i class="fa-solid fa-truck-ramp-box"></i>', 'Faol zakazlar', fmtNum(activeOrders.length) + ' ta', '', 'blue')}
+        ${statCard('<i class="fa-solid fa-bread-slice"></i>', 'Yetkazilishi kerak', fmtNum(totalRemainingQty) + ' dona', '', 'amber')}
+        ${statCard('<i class="fa-solid fa-circle-check"></i>', 'Yetkazilgan nonlar', fmtNum(totalDeliveredQty) + ' dona', '', 'green')}
+      </div>
+
+      <!-- Navigation Tabs, Status Filter & Search -->
+      <div class="card" style="margin-bottom:20px; padding:14px 18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div class="delivery-tabs-wrap" style="margin-bottom:0; border-bottom:none; padding-bottom:0;">
+            <button class="delivery-tab-btn ${activeTab === 'active' && !selectedStatus ? 'active' : (selectedStatus === 'approved' ? 'active' : '')}" id="tab-active-btn">
+              <i class="fa-solid fa-truck-fast"></i>
+              Tasdiqlangan zakazlar
+              <span class="delivery-tab-badge">${activeOrders.length}</span>
+            </button>
+            <button class="delivery-tab-btn ${activeTab === 'history' && !selectedStatus ? 'active' : (selectedStatus === 'completed' || selectedStatus === 'delivered' ? 'active' : '')}" id="tab-history-btn">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              Yetkazilganlar
+              <span class="delivery-tab-badge">${historyOrders.length}</span>
+            </button>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:8px; min-width:280px; flex:1; max-width:520px;">
+            <select id="delivery-status-filter" style="height:38px; padding:0 8px; font-size:var(--text-xs); border-radius:var(--radius-md); border:1px solid var(--color-border); background:var(--color-surface-2); color:var(--color-text); cursor:pointer;" title="Status bo'yicha filterlash">
+              <option value="" ${!selectedStatus ? 'selected' : ''}>Barcha statuslar</option>
+              <option value="approved" ${selectedStatus === 'approved' ? 'selected' : ''}>Tasdiqlangan (approved)</option>
+              <option value="completed" ${selectedStatus === 'completed' ? 'selected' : ''}>Bajarilgan (completed)</option>
+              <option value="delivered" ${selectedStatus === 'delivered' ? 'selected' : ''}>Yetkazilgan (delivered)</option>
+            </select>
+            <input type="text" id="delivery-search-input" placeholder="Do'kon, manzil yoki zakaz # bo'yicha..." value="${escapeHtml(searchQuery)}" style="height:38px; flex:1;" />
+            <button class="icon-btn" id="delivery-manual-refresh-btn" title="Yangilash" style="height:38px; width:38px; flex-shrink:0;">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Orders List Container -->
+      <div id="delivery-orders-list">
+        ${filteredOrders.length ? filteredOrders.map(order => renderDeliveryOrderCard(order)).join('') : `
+          <div class="delivery-empty-state">
+            <div class="delivery-empty-icon">
+              <i class="fa-solid ${activeTab === 'active' ? 'fa-truck-ramp-box' : 'fa-clipboard-check'}"></i>
+            </div>
+            <h3 style="margin:0 0 6px 0; color:var(--color-text);">
+              ${activeTab === 'active' ? "Hozircha tasdiqlangan zakazlar mavjud emas" : "Hozircha yetkazilgan zakazlar mavjud emas"}
+            </h3>
+            <p style="margin:0; font-size:var(--text-xs); color:var(--color-text-muted);">
+              ${activeTab === 'active' ? "Nonvoyxona admini tomonidan tasdiqlangan yangi zakazlar bu yerda avtomatik paydo bo'ladi." : "Yetkazib berilgan barcha zakazlar tarixi shu yerda saqlanadi."}
+            </p>
+          </div>
+        `}
+      </div>
+    `;
+
+    // Hodisalarni ulash
+    const refreshBtn = content.querySelector('#delivery-manual-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.onclick = async () => {
+        refreshBtn.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i>';
+        await loadData();
+        toast("Zakazlar yangilandi", 'info');
+      };
+    }
+
+    const logoutBtn = content.querySelector('#delivery-header-logout-btn');
+    if (logoutBtn) {
+      logoutBtn.onclick = () => onLogout();
+    }
+
+    const statusSelect = content.querySelector('#delivery-status-filter');
+    if (statusSelect) {
+      statusSelect.onchange = async () => {
+        selectedStatus = statusSelect.value;
+        if (selectedStatus === 'approved') {
+          activeTab = 'active';
+        } else if (selectedStatus === 'completed' || selectedStatus === 'delivered') {
+          activeTab = 'history';
+        }
+        await loadData();
+      };
+    }
+
+    const tabActive = content.querySelector('#tab-active-btn');
+    const tabHist = content.querySelector('#tab-history-btn');
+    if (tabActive) {
+      tabActive.onclick = async () => {
+        activeTab = 'active';
+        location.hash = '#/dashboard';
+        if (selectedStatus === 'completed' || selectedStatus === 'delivered') {
+          selectedStatus = '';
+          await loadData();
+        } else {
+          renderUI();
+        }
+      };
+    }
+    if (tabHist) {
+      tabHist.onclick = async () => {
+        activeTab = 'history';
+        location.hash = '#/delivery/history';
+        if (selectedStatus === 'approved') {
+          selectedStatus = '';
+          await loadData();
+        } else {
+          renderUI();
+        }
+      };
+    }
+
+    const searchInp = content.querySelector('#delivery-search-input');
+    if (searchInp) {
+      searchInp.oninput = (e) => {
+        searchQuery = e.target.value;
+        renderUI();
+      };
+    }
+
+    // Har bir mahsulot uchun miqdor kiritish va tasdiqlash
+    content.querySelectorAll('.delivery-confirm-btn, .delivery-submit-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const orderId = btn.dataset.orderId;
+        const itemId = btn.dataset.itemId;
+        const maxQty = Number(btn.dataset.maxQty) || 0;
+        const card = btn.closest('.delivery-item-card');
+        const input = card?.querySelector('.delivery-qty-input');
+
+        if (!input) return;
+
+        const qty = parseInt(input.value, 10);
+
+        if (isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
+          toast("Iltimos, musbat butun son kiriting (masalan: 10, 50)", 'warning');
+          input.focus();
+          return;
+        }
+
+        if (qty > maxQty) {
+          toast(`Kiritilgan miqdor qolgan zakaz miqdoridan (${maxQty} dona) oshmasligi kerak`, 'warning');
+          input.focus();
+          return;
+        }
+
+        btn.disabled = true;
+        input.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
+
+        try {
+          await API.post(`/deliveries/orders/${orderId}/items/${itemId}`, {
+            quantity: qty
+          });
+
+          toast("Berilgan miqdor saqlandi", 'success');
+          // Ma'lumotlarni qayta yuklab UI ni to'liq yangilaymiz
+          await loadData(true);
+        } catch (err) {
+          toast(err.message || "Miqdorni saqlashda xatolik yuz berdi", 'error');
+          btn.disabled = false;
+          input.disabled = false;
+          btn.innerHTML = `<i class="fa-solid fa-check"></i> Tasdiqlash`;
+        }
+      };
+    });
+
+    // Qty inputida Enter tugmasi bosilganda tasdiqlashni chaqirish
+    content.querySelectorAll('.delivery-qty-input').forEach(input => {
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const card = input.closest('.delivery-item-card');
+          const btn = card?.querySelector('.delivery-confirm-btn, .delivery-submit-btn');
+          if (btn && !btn.disabled) {
+            btn.click();
+          }
+        }
+      };
+    });
+  }
+
+  function renderDeliveryOrderCard(order) {
+    const store = order.store || {};
+    const storeName = store.name || order.store_name || ('Do‘kon #' + (order.store_id || ''));
+    const storeAddress = store.address || order.store_address || 'Manzil ko‘rsatilmagan';
+    const storePhone = store.phone || order.store_phone || '';
+    const createdDate = formatDateTime(order.created_at || order.createdAt);
+    const items = order.items || order.order_items || order.OrderItems || [];
+    const isOrderDone = order.status === 'completed' || order.status === 'delivered';
+
+    let statusBadge = '';
+    if (order.status === 'completed') {
+      statusBadge = `<span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Bajarilgan (completed)</span>`;
+    } else if (order.status === 'delivered') {
+      statusBadge = `<span class="badge badge-green"><i class="fa-solid fa-truck-ramp-box"></i> Yetkazilgan (delivered)</span>`;
+    } else if (order.status === 'approved') {
+      statusBadge = `<span class="badge badge-blue"><i class="fa-solid fa-truck-fast"></i> Tasdiqlangan</span>`;
+    } else {
+      statusBadge = `<span class="badge badge-gray">${escapeHtml(order.status || '')}</span>`;
+    }
+
+    return `
+      <div class="delivery-card" id="delivery-order-${order.id}">
+        <div class="delivery-card-top">
+          <div class="delivery-card-title">
+            <span class="delivery-order-tag">
+              <i class="fa-solid fa-receipt"></i> Zakaz #${order.id}
+            </span>
+            ${statusBadge}
+          </div>
+          <div class="muted" style="font-size:var(--text-xs); display:flex; align-items:center; gap:5px;">
+            <i class="fa-regular fa-clock"></i> ${createdDate}
+          </div>
+        </div>
+
+        <div class="delivery-store-box">
+          <div>
+            <div class="delivery-store-name">
+              <i class="fa-solid fa-store" style="color:var(--color-primary);"></i>
+              ${escapeHtml(storeName)}
+            </div>
+            <div class="delivery-store-address">
+              <i class="fa-solid fa-location-dot" style="color:var(--color-danger);"></i>
+              ${escapeHtml(storeAddress)}
+            </div>
+          </div>
+          ${storePhone ? `
+            <a href="tel:${escapeHtml(storePhone)}" class="delivery-call-btn" title="Do'konga qo'ng'iroq qilish">
+              <i class="fa-solid fa-phone"></i>
+              <span>${escapeHtml(storePhone)}</span>
+            </a>
+          ` : ''}
+        </div>
+
+        ${order.note ? `
+          <div class="delivery-note-box">
+            <i class="fa-solid fa-comment-dots" style="color:var(--color-primary); margin-top:2px;"></i>
+            <div><strong>Do‘kon izohi:</strong> ${escapeHtml(order.note)}</div>
+          </div>
+        ` : ''}
+
+        <div class="delivery-items-title">
+          <i class="fa-solid fa-boxes-stacked"></i> Yetkazib beriladigan mahsulotlar
+        </div>
+
+        <div class="delivery-items-list">
+          ${items.map(item => {
+            const prodName = item.product?.name || item.product_name || item.name || ('Mahsulot #' + item.product_id);
+            const stats = getItemDeliveryStats(item);
+            const isItemDelivered = isOrderDone || stats.isDelivered;
+
+            return `
+              <div class="delivery-item-card ${isItemDelivered ? 'is-delivered' : ''}">
+                <div class="delivery-item-main">
+                  <div class="delivery-item-name">
+                    <i class="fa-solid fa-bread-slice" style="color:var(--color-primary); margin-right:6px;"></i>
+                    ${escapeHtml(prodName)}
+                  </div>
+                  <div class="delivery-item-stats">
+                    <span>Zakaz: <strong>${fmtNum(stats.ordered)} dona</strong></span>
+                    <span>Berilgan: <strong style="color:var(--color-green);">${fmtNum(stats.delivered)} dona</strong></span>
+                    ${!isItemDelivered ? `
+                      <span>Qolgan: <strong style="color:var(--color-primary);">${fmtNum(stats.remaining)} dona</strong></span>
+                    ` : ''}
+                  </div>
+                </div>
+
+                <div class="delivery-item-action">
+                  ${isItemDelivered ? `
+                    <div class="delivery-completed-badge">
+                      <i class="fa-solid fa-circle-check"></i>
+                      <span>Yetkazildi: <strong>${fmtNum(stats.delivered || stats.ordered)} dona</strong></span>
+                      ${stats.deliveryDate ? `<small style="opacity:0.85; margin-left:4px;">(${formatDateTime(stats.deliveryDate)})</small>` : ''}
+                    </div>
+                  ` : `
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <label style="font-size:var(--text-xs); color:var(--color-text-muted); font-weight:600;">Berilgan:</label>
+                      <input type="number" class="delivery-qty-input" min="1" max="${stats.remaining}" value="${stats.remaining}" step="1" aria-label="Berilgan miqdor" />
+                    </div>
+                    <button class="btn btn-primary delivery-confirm-btn" data-order-id="${order.id}" data-item-id="${item.id}" data-max-qty="${stats.remaining}">
+                      <i class="fa-solid fa-check"></i> Tasdiqlash
+                    </button>
+                  `}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // Dastlabki yuklash
+  await loadData();
+
+  // 25 soniyali polling boshlash
+  stopDeliveryPolling();
+  deliveryPollTimer = setInterval(() => {
+    if (isDeliveryUser() && (location.hash === '#/dashboard' || location.hash.startsWith('#/delivery'))) {
+      loadData(true);
+    } else {
+      stopDeliveryPolling();
+    }
+  }, 25000);
+}
+
+/* ===================== SECTION 22: HAYDOVCHILAR BOSHQARUVI ===================== */
+async function renderDrivers(content) {
+  const isSuperAdmin = state.user?.role === 'super_admin';
+  const isBakeryAdmin = state.user?.role === 'bakery_admin';
+
+  if (!isSuperAdmin && !isBakeryAdmin) {
+    location.hash = '#/dashboard';
+    return;
+  }
+
+  const bizId = effectiveBizId();
+  const bizParam = bizId ? `?business_id=${bizId}` : '';
+
+  // Parallel yuklash
+  const [assignmentsRes, usersRes, businessesRes] = await Promise.all([
+    API.get('/delivery-assignments' + bizParam),
+    API.get('/users'),
+    state.businesses?.length ? state.businesses : API.get('/businesses')
+  ]);
+
+  const assignments = Array.isArray(assignmentsRes) ? assignmentsRes : (assignmentsRes?.data || []);
+  const allUsers = Array.isArray(usersRes) ? usersRes : (usersRes?.data || []);
+  const businesses = Array.isArray(businessesRes) ? businessesRes : (businessesRes?.data || []);
+
+  const bizName = (id) => businesses.find(b => String(b.id) === String(id))?.name || (id ? `Nonvoyxona #${id}` : '—');
+
+  // Haydovchilarni filtrlash
+  let drivers = allUsers.filter(u => u.role === 'delivery' || u.role === 'dostavkachi');
+  if (bizId) {
+    drivers = drivers.filter(u => String(u.business_id) === String(bizId));
+  }
+
+  // Biriktiruvlarda bor, lekin users ro'yxatida bo'lmasligi mumkin bo'lgan haydovchilarni qo'shish
+  assignments.forEach(a => {
+    if (a.delivery_user && !drivers.some(d => Number(d.id) === Number(a.delivery_user_id))) {
+      drivers.push({
+        id: a.delivery_user.id,
+        username: a.delivery_user.username,
+        full_name: a.delivery_user.full_name,
+        role: a.delivery_user.role || 'delivery',
+        business_id: a.business_id,
+        active: 1
+      });
+    }
+  });
+
+  // Haydovchilar bo'yicha guruhlash
+  const driverDataList = drivers.map(driver => {
+    const driverAssignments = assignments.filter(a => Number(a.delivery_user_id) === Number(driver.id));
+    const hasAllStores = driverAssignments.some(a => a.store_id === null || !a.store);
+    const specificStores = driverAssignments.filter(a => a.store_id !== null && a.store);
+    const assignedBizName = driver.business_name || bizName(driver.business_id) || driverAssignments[0]?.business?.name || '—';
+
+    return {
+      driver,
+      assignments: driverAssignments,
+      hasAllStores,
+      allStoresAssignmentId: driverAssignments.find(a => a.store_id === null || !a.store)?.id,
+      specificStores,
+      assignedBizName
+    };
+  });
+
+  // Statistika
+  const totalDrivers = driverDataList.length;
+  const assignedDriversCount = driverDataList.filter(d => d.assignments.length > 0).length;
+  const allStoresCount = driverDataList.filter(d => d.hasAllStores).length;
+
+  content.innerHTML = `
+    <div class="section-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2>Haydovchilar boshqaruvi</h2>
+        <p>Dostavkachilar ro‘yxati, nonvoyxona va do‘konlarga biriktiruvlar nazorati</p>
+      </div>
+      <div class="drivers-head-actions">
+        ${isSuperAdmin ? `
+          <button class="btn btn-primary" id="add-driver-btn">
+            <i class="fa-solid fa-user-plus"></i> Yangi haydovchi
+          </button>
+        ` : ''}
+      </div>
+    </div>
+
+    <!-- Statistika kartalari -->
+    <div class="stat-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 20px;">
+      <div class="stat-card">
+        <div class="stat-label"><i class="fa-solid fa-id-card"></i> Jami haydovchilar</div>
+        <div class="stat-value" id="stat-total-drivers">${totalDrivers}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label"><i class="fa-solid fa-link"></i> Biriktirilganlar</div>
+        <div class="stat-value" style="color:var(--color-green);">${assignedDriversCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label"><i class="fa-solid fa-layer-group"></i> Barcha do‘konlar qamrovi</div>
+        <div class="stat-value" style="color:#2563eb;">${allStoresCount}</div>
+      </div>
+    </div>
+
+    <!-- Asosiy jadval kartasi -->
+    <div class="card">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <h3>Haydovchilar ro‘yxati (<span id="drivers-count-badge">${totalDrivers}</span>)</h3>
+        <div style="min-width: 240px;">
+          <input type="search" id="drivers-search-input" placeholder="Ism, login yoki do'kon bo'yicha..." style="width:100%; padding:6px 12px; font-size:var(--text-xs); border-radius:var(--radius-md); border:1px solid var(--color-border); background:var(--color-surface-2);" />
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="drivers-table">
+          <thead>
+            <tr>
+              <th>Haydovchi</th>
+              <th>Login</th>
+              <th>Telefon / Ma'lumot</th>
+              <th>Biriktirilgan nonvoyxona</th>
+              <th>Biriktirilgan do‘konlar</th>
+              <th>Holati</th>
+              <th style="text-align:right;">Amallar</th>
+            </tr>
+          </thead>
+          <tbody id="drivers-tbody">
+            ${renderDriversRows(driverDataList, isSuperAdmin)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // Qidiruv filtri
+  const searchInput = content.querySelector('#drivers-search-input');
+  if (searchInput) {
+    searchInput.oninput = (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      const filtered = driverDataList.filter(item => {
+        const name = (item.driver.full_name || '').toLowerCase();
+        const uname = (item.driver.username || '').toLowerCase();
+        const biz = (item.assignedBizName || '').toLowerCase();
+        const stores = item.specificStores.map(s => (s.store?.name || '').toLowerCase()).join(' ');
+        return name.includes(q) || uname.includes(q) || biz.includes(q) || stores.includes(q);
+      });
+      const tbody = content.querySelector('#drivers-tbody');
+      if (tbody) tbody.innerHTML = renderDriversRows(filtered, isSuperAdmin);
+      bindDriverActions(content, driverDataList, businesses, isSuperAdmin);
+    };
+  }
+
+  // Yangi haydovchi tugmasi (faqat super_admin)
+  const addBtn = content.querySelector('#add-driver-btn');
+  if (addBtn && isSuperAdmin) {
+    addBtn.onclick = () => driverFormModal(bizId, businesses);
+  }
+
+  // Amallarni ulash
+  bindDriverActions(content, driverDataList, businesses, isSuperAdmin);
+}
+
+function renderDriversRows(driverDataList, isSuperAdmin = false) {
+  if (!driverDataList.length) {
+    return `<tr class="empty-row"><td colspan="7" style="text-align:center; padding:32px 16px; color:var(--color-text-muted);">
+      <i class="fa-solid fa-id-card" style="font-size:28px; opacity:0.5; margin-bottom:8px; display:block;"></i>
+      Haydovchilar mavjud emas
+    </td></tr>`;
+  }
+
+  return driverDataList.map(({ driver, assignments, hasAllStores, allStoresAssignmentId, specificStores, assignedBizName }) => {
+    const initials = (driver.full_name || driver.username || 'H')
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(w => w[0].toUpperCase())
+      .join('');
+
+    let storesHtml = '';
+    if (hasAllStores) {
+      storesHtml = `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="driver-all-stores-badge" title="Tanlangan nonvoyxonaning barcha do'konlariga biriktirilgan">
+            <i class="fa-solid fa-layer-group"></i> Barcha do‘konlar
+          </span>
+          ${allStoresAssignmentId ? `
+            <button class="driver-store-tag-remove" data-del-assignment="${allStoresAssignmentId}" title="Ushbu do‘konni haydovchidan olib tashlash" style="color:var(--color-danger); font-size:12px;">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          ` : ''}
+        </div>
+      `;
+    } else if (specificStores.length > 0) {
+      storesHtml = `
+        <div class="driver-stores-cell">
+          ${specificStores.map(a => `
+            <span class="driver-store-tag" title="${escapeHtml(a.store?.address || '')}">
+              <i class="fa-solid fa-store"></i>
+              <span>${escapeHtml(a.store?.name || `Do'kon #${a.store_id}`)}</span>
+              <button type="button" class="driver-store-tag-remove" data-del-assignment="${a.id}" title="Ushbu do‘konni haydovchidan olib tashlash">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </span>
+          `).join('')}
+        </div>
+      `;
+    } else {
+      storesHtml = `<span class="driver-unassigned-text"><i class="fa-solid fa-circle-exclamation"></i> Biriktirilmagan</span>`;
+    }
+
+    const isActive = driver.active !== 0 && driver.active !== false;
+
+    return `
+      <tr data-driver-row="${driver.id}">
+        <td>
+          <div class="driver-user-cell">
+            <div class="driver-avatar-circle">${initials || 'H'}</div>
+            <div class="driver-info-col">
+              <span class="driver-name-text">${escapeHtml(driver.full_name || 'Ismsiz')}</span>
+              <span class="driver-username-text">@${escapeHtml(driver.username)}</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <code style="font-size:var(--text-xs); color:var(--color-primary);">${escapeHtml(driver.username)}</code>
+        </td>
+        <td class="muted">
+          ${driver.phone ? `<i class="fa-solid fa-phone" style="font-size:11px; margin-right:4px;"></i>${escapeHtml(driver.phone)}` : '<span style="opacity:0.6;">Dostavka xodimi</span>'}
+        </td>
+        <td>
+          <span style="font-weight:500; color:var(--color-text);">${escapeHtml(assignedBizName)}</span>
+        </td>
+        <td>
+          ${storesHtml}
+        </td>
+        <td>
+          ${isActive ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}
+        </td>
+        <td style="text-align:right;">
+          <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end; flex-wrap:nowrap;">
+            <button class="btn btn-primary btn-sm" data-add-store="${driver.id}" title="Haydovchiga yangi do‘kon qo‘shish">
+              <i class="fa-solid fa-plus"></i> Do‘kon qo‘shish
+            </button>
+            ${isSuperAdmin ? `
+              <button class="icon-btn" data-edit-driver="${driver.id}" title="Haydovchini tahrirlash">
+                <i class="fa-solid fa-pen-to-square"></i>
+              </button>
+              <button class="icon-btn" data-del-user="${driver.id}" data-driver-name="${escapeHtml(driver.full_name || driver.username)}" title="Haydovchini o‘chirish" style="color:var(--color-danger);">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            ` : ''}
+            ${assignments.length > 0 ? `
+              <button class="driver-unassign-btn" data-del-driver-all="${driver.id}" title="Haydovchining barcha biriktiruvlarini bekor qilish">
+                <i class="fa-solid fa-link-slash"></i> Bekor qilish
+              </button>
+            ` : ''}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function bindDriverActions(container, driverDataList, businesses = [], isSuperAdmin = false) {
+  // 1. Alohida do'kon biriktiruvini olib tashlash
+  container.querySelectorAll('[data-del-assignment]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const assignmentId = btn.dataset.delAssignment;
+      confirmAction("Ushbu do‘konni haydovchidan olib tashlamoqchimisiz?", async () => {
+        try {
+          await API.del('/delivery-assignments/' + assignmentId);
+          toast("Do‘kon biriktiruvi olib tashlandi", 'success');
+          render();
+        } catch (err) {
+          toast(err.message || 'Xatolik yuz berdi', 'error');
+        }
+      });
+    };
+  });
+
+  // 2. Haydovchining barcha biriktiruvlarini bekor qilish
+  container.querySelectorAll('[data-del-driver-all]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const driverId = btn.dataset.delDriverAll;
+      const driverItem = driverDataList.find(d => Number(d.driver.id) === Number(driverId));
+      if (!driverItem || !driverItem.assignments.length) return;
+
+      confirmAction("Ushbu do‘konni haydovchidan olib tashlamoqchimisiz?", async () => {
+        try {
+          for (const a of driverItem.assignments) {
+            await API.del('/delivery-assignments/' + a.id);
+          }
+          toast("Biriktiruv bekor qilindi", 'success');
+          render();
+        } catch (err) {
+          toast(err.message || 'Xatolik yuz berdi', 'error');
+        }
+      });
+    };
+  });
+
+  // 3. Haydovchiga yangi do‘kon qo‘shish tugmasi
+  container.querySelectorAll('[data-add-store]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const driverId = btn.dataset.addStore;
+      const driverItem = driverDataList.find(d => Number(d.driver.id) === Number(driverId));
+      if (driverItem) {
+        addStoreToDriverModal(driverItem, businesses);
+      }
+    };
+  });
+
+  // 4. Haydovchini tahrirlash (faqat super_admin)
+  if (isSuperAdmin) {
+    container.querySelectorAll('[data-edit-driver]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const driverId = btn.dataset.editDriver;
+        const driverItem = driverDataList.find(d => Number(d.driver.id) === Number(driverId));
+        if (driverItem) {
+          editDriverModal(driverItem.driver, businesses);
+        }
+      };
+    });
+
+    // 5. Haydovchini tizimdan o'chirish (faqat super_admin)
+    container.querySelectorAll('[data-del-user]').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const driverId = btn.dataset.delUser;
+        const driverName = btn.dataset.driverName || 'haydovchi';
+
+        confirmAction(`Haqiqatan ham "${driverName}" haydovchisini tizimdan o‘chirmoqchimisiz?`, async () => {
+          try {
+            await API.del('/users/' + driverId);
+            toast("Haydovchi muvaffaqiyatli o‘chirildi", 'success');
+            render();
+          } catch (err) {
+            toast(err.message || "Haydovchini o‘chirishda xatolik yuz berdi", 'error');
+          }
+        });
+      };
+    });
+  }
+}
+
+/**
+ * Yangi haydovchi yaratish formasi modali
+ */
+function driverFormModal(defaultBizId, businesses = []) {
+  const isSuperAdmin = state.user?.role === 'super_admin';
+  if (!isSuperAdmin) {
+    toast("Faqat katta admin yangi haydovchi qo‘sha oladi", 'error');
+    return;
+  }
+  const myBizId = defaultBizId || businesses[0]?.id || '';
+
+  const bizList = businesses.length ? businesses : state.businesses;
+  const currentBizName = bizList.find(b => String(b.id) === String(myBizId))?.name || (myBizId ? `Nonvoyxona #${myBizId}` : '');
+
+  openModal("Yangi haydovchi qo‘shish", `
+    <form id="driver-create-form">
+      <div class="form-grid">
+        <div class="form-section-title"><i class="fa-solid fa-id-card"></i> Haydovchi ma'lumotlari</div>
+        
+        <div class="field span-2">
+          <label>To‘liq ism *</label>
+          <input required id="f-driver-name" placeholder="Masalan: Sardor Rustamov" autocomplete="name" />
+        </div>
+
+        <div class="field span-2">
+          <label>Login *</label>
+          <input required id="f-driver-username" pattern="[A-Za-z0-9_.-]{3,30}" placeholder="Masalan: haydovchi2" title="Login 3-30 ta belgi (lotin harflari, raqamlar)" autocomplete="off" />
+        </div>
+
+        <div class="field span-2">
+          <label>Parol *</label>
+          <div style="position:relative; display:flex; align-items:center;">
+            <input required type="password" id="f-driver-password" placeholder="Masalan: dostavka123" style="width:100%; padding-right:38px;" autocomplete="new-password" />
+            <button type="button" id="f-driver-pwd-toggle" style="position:absolute; right:10px; background:none; border:none; color:var(--color-text-muted); cursor:pointer;" title="Parolni ko'rsatish">
+              <i class="fa-regular fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-section-title"><i class="fa-solid fa-building-circle-arrow-right"></i> Biriktiriladigan nonvoyxona va do‘konlar</div>
+
+        <div class="field span-2">
+          <label>Nonvoyxona *</label>
+          ${isSuperAdmin ? `
+            <select required id="f-driver-biz" aria-label="Nonvoyxonani tanlang">
+              <option value="">-- Nonvoyxonani tanlang --</option>
+              ${bizList.map(b => `<option value="${b.id}" ${String(b.id) === String(myBizId) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+            </select>
+          ` : `
+            <input type="hidden" id="f-driver-biz" value="${myBizId}" />
+            <div style="background:var(--color-surface-2); border:1px solid var(--color-border); padding:10px 14px; border-radius:var(--radius-md); font-weight:600; display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-industry" style="color:var(--color-primary);"></i>
+              <span>${escapeHtml(currentBizName)}</span>
+            </div>
+          `}
+        </div>
+
+        <div class="field span-2" style="margin-top:4px;">
+          <label class="checkbox-label" style="display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:600; user-select:none;">
+            <input type="checkbox" id="f-driver-all-stores" style="width:18px; height:18px; accent-color:var(--color-primary);" />
+            <span>Barcha do‘konlarga biriktirish</span>
+          </label>
+        </div>
+
+        <div class="field span-2" id="f-driver-stores-group">
+          <label style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Do‘konlar (bir yoki bir nechtasini tanlang)</span>
+            <small style="color:var(--color-text-muted); font-size:11px;" id="selected-stores-counter">0 ta tanlandi</small>
+          </label>
+          
+          <div id="stores-picker-wrapper" class="stores-picker-box">
+            <div class="stores-picker-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Do‘konlar yuklanmoqda...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:20px;">
+        <button type="button" class="btn btn-secondary" id="driver-cancel-btn">Bekor qilish</button>
+        <button type="submit" class="btn btn-primary" id="driver-save-btn">
+          <i class="fa-solid fa-check"></i> Saqlash
+        </button>
+      </div>
+    </form>
+  `, (backdrop) => {
+    const form = backdrop.querySelector('#driver-create-form');
+    const bizSelect = backdrop.querySelector('#f-driver-biz');
+    const allStoresCheckbox = backdrop.querySelector('#f-driver-all-stores');
+    const storesGroup = backdrop.querySelector('#f-driver-stores-group');
+    const pickerWrapper = backdrop.querySelector('#stores-picker-wrapper');
+    const counterEl = backdrop.querySelector('#selected-stores-counter');
+    const cancelBtn = backdrop.querySelector('#driver-cancel-btn');
+    const submitBtn = backdrop.querySelector('#driver-save-btn');
+    const pwdToggle = backdrop.querySelector('#f-driver-pwd-toggle');
+    const pwdInput = backdrop.querySelector('#f-driver-password');
+
+    // Parol ko'rsatish toggle
+    if (pwdToggle && pwdInput) {
+      pwdToggle.onclick = () => {
+        const isPass = pwdInput.type === 'password';
+        pwdInput.type = isPass ? 'text' : 'password';
+        pwdToggle.innerHTML = isPass ? '<i class="fa-regular fa-eye-slash"></i>' : '<i class="fa-regular fa-eye"></i>';
+      };
+    }
+
+    if (cancelBtn) cancelBtn.onclick = () => backdrop.remove();
+
+    let loadedStores = [];
+
+    // Do'konlarni nonvoyxona bo'yicha yuklash funksiyasi
+    async function loadStoresForBusiness(selectedBizId) {
+      if (!selectedBizId) {
+        pickerWrapper.className = 'stores-picker-box is-disabled';
+        pickerWrapper.innerHTML = `<div class="stores-picker-empty"><i class="fa-solid fa-circle-info"></i> Avval nonvoyxonani tanlang</div>`;
+        if (counterEl) counterEl.textContent = '0 ta tanlandi';
+        return;
+      }
+
+      pickerWrapper.className = 'stores-picker-box';
+      pickerWrapper.innerHTML = `<div class="stores-picker-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Do‘konlar yuklanmoqda...</div>`;
+
+      try {
+        const list = await API.get(`/stores?business_id=${selectedBizId}`);
+        loadedStores = Array.isArray(list) ? list : (list?.data || []);
+
+        if (!loadedStores.length) {
+          pickerWrapper.innerHTML = `<div class="stores-picker-empty">Bu nonvoyxonada hozircha do‘konlar mavjud emas</div>`;
+          if (counterEl) counterEl.textContent = '0 ta tanlandi';
+          return;
+        }
+
+        pickerWrapper.innerHTML = loadedStores.map(store => `
+          <label class="store-check-item">
+            <input type="checkbox" class="store-check-input" value="${store.id}" />
+            <div class="store-check-details">
+              <span class="store-check-name">${escapeHtml(store.name)}</span>
+              ${store.address ? `<span class="store-check-address">${escapeHtml(store.address)}</span>` : ''}
+            </div>
+          </label>
+        `).join('');
+
+        // Har bir checkbox bosilganda hisoblagichni yangilash
+        pickerWrapper.querySelectorAll('.store-check-input').forEach(cb => {
+          cb.onchange = updateCounter;
+        });
+        updateCounter();
+      } catch (err) {
+        pickerWrapper.innerHTML = `<div class="stores-picker-empty" style="color:var(--color-danger);"><i class="fa-solid fa-triangle-exclamation"></i> Do‘konlarni yuklab bo‘lmadi</div>`;
+      }
+    }
+
+    function updateCounter() {
+      if (!counterEl) return;
+      const checked = pickerWrapper.querySelectorAll('.store-check-input:checked').length;
+      counterEl.textContent = `${checked} ta tanlandi`;
+    }
+
+    // Barcha do'konlarga biriktirish checkbox o'zgarganda
+    allStoresCheckbox.onchange = () => {
+      const isAll = allStoresCheckbox.checked;
+      if (isAll) {
+        storesGroup.style.display = 'none';
+      } else {
+        storesGroup.style.display = '';
+        updateCounter();
+      }
+    };
+
+    // Nonvoyxona o'zgarganda
+    if (bizSelect) {
+      bizSelect.onchange = () => {
+        loadStoresForBusiness(bizSelect.value);
+      };
+    }
+
+    // Dastlabki do'konlarni yuklash
+    const initialBizId = bizSelect ? bizSelect.value : myBizId;
+    loadStoresForBusiness(initialBizId);
+
+    // Form yuborilishi
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+
+      const fullName = backdrop.querySelector('#f-driver-name').value.trim();
+      const username = backdrop.querySelector('#f-driver-username').value.trim();
+      const password = backdrop.querySelector('#f-driver-password').value;
+      const businessId = bizSelect ? bizSelect.value : myBizId;
+      const isAllStores = allStoresCheckbox.checked;
+
+      if (!fullName || !username || !password || !businessId) {
+        toast("Iltimos, barcha majburiy maydonlarni to‘ldiring", 'warning');
+        return;
+      }
+
+      let store_ids = [];
+      if (!isAllStores) {
+        const checkedInputs = pickerWrapper.querySelectorAll('.store-check-input:checked');
+        store_ids = Array.from(checkedInputs).map(cb => Number(cb.value)).filter(id => id > 0);
+        // Takrorlanishlarni bartaraf etish
+        store_ids = [...new Set(store_ids)];
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
+
+      try {
+        const payload = {
+          username,
+          password,
+          full_name: fullName,
+          role: 'delivery',
+          business_id: Number(businessId),
+          store_ids
+        };
+
+        await API.post('/users', payload);
+        backdrop.remove();
+        toast("Yangi haydovchi muvaffaqiyatli qo‘shildi", 'success');
+        render();
+      } catch (err) {
+        toast(err.message || "Haydovchini yaratishda xatolik", 'error');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Saqlash';
+      }
+    };
+  });
+}
+
+/**
+ * Haydovchini tahrirlash modali (faqat katta admin uchun)
+ */
+function editDriverModal(driver, businesses = []) {
+  const isSuperAdmin = state.user?.role === 'super_admin';
+  if (!isSuperAdmin) {
+    toast("Faqat katta admin haydovchini tahrirlay oladi", 'error');
+    return;
+  }
+
+  const bizList = businesses.length ? businesses : state.businesses;
+  const currentBizId = driver.business_id || (bizList[0]?.id || '');
+  const isActive = driver.active !== 0 && driver.active !== false;
+
+  openModal(`Haydovchini tahrirlash — ${escapeHtml(driver.full_name || driver.username)}`, `
+    <form id="driver-edit-form">
+      <div class="form-grid">
+        <div class="form-section-title"><i class="fa-solid fa-user-pen"></i> Asosiy ma'lumotlar</div>
+
+        <div class="field span-2">
+          <label>Login</label>
+          <input disabled value="${escapeHtml(driver.username)}" style="opacity:0.75; cursor:not-allowed; background:var(--color-surface-2);" />
+          <small style="color:var(--color-text-muted); font-size:11px;">Login o‘zgartirilmaydi</small>
+        </div>
+
+        <div class="field span-2">
+          <label>To‘liq ism *</label>
+          <input required id="f-edit-driver-name" value="${escapeHtml(driver.full_name || '')}" placeholder="Masalan: Sardor Rustamov" autocomplete="name" />
+        </div>
+
+        <div class="field span-2">
+          <label>Yangi parol <span style="font-weight:400; color:var(--color-text-muted);">(o‘zgartirmaslik uchun bo‘sh qoldiring)</span></label>
+          <div style="position:relative; display:flex; align-items:center;">
+            <input type="password" id="f-edit-driver-password" placeholder="Yangi parol (ixtiyoriy)" style="width:100%; padding-right:38px;" autocomplete="new-password" />
+            <button type="button" id="f-edit-driver-pwd-toggle" style="position:absolute; right:10px; background:none; border:none; color:var(--color-text-muted); cursor:pointer;" title="Parolni ko'rsatish">
+              <i class="fa-regular fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="field span-2">
+          <label>Nonvoyxona *</label>
+          <select required id="f-edit-driver-biz" aria-label="Nonvoyxonani tanlang">
+            <option value="">-- Nonvoyxonani tanlang --</option>
+            ${bizList.map(b => `<option value="${b.id}" ${String(b.id) === String(currentBizId) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="field span-2">
+          <label>Holati (Status) *</label>
+          <select required id="f-edit-driver-status" aria-label="Holatni tanlang">
+            <option value="1" ${isActive ? 'selected' : ''}>Faol</option>
+            <option value="0" ${!isActive ? 'selected' : ''}>Nofaol</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:20px;">
+        <button type="button" class="btn btn-secondary" id="driver-edit-cancel-btn">Bekor qilish</button>
+        <button type="submit" class="btn btn-primary" id="driver-edit-save-btn">
+          <i class="fa-solid fa-check"></i> Saqlash
+        </button>
+      </div>
+    </form>
+  `, (backdrop) => {
+    const form = backdrop.querySelector('#driver-edit-form');
+    const cancelBtn = backdrop.querySelector('#driver-edit-cancel-btn');
+    const submitBtn = backdrop.querySelector('#driver-edit-save-btn');
+    const pwdToggle = backdrop.querySelector('#f-edit-driver-pwd-toggle');
+    const pwdInput = backdrop.querySelector('#f-edit-driver-password');
+
+    if (pwdToggle && pwdInput) {
+      pwdToggle.onclick = () => {
+        const isPass = pwdInput.type === 'password';
+        pwdInput.type = isPass ? 'text' : 'password';
+        pwdToggle.innerHTML = isPass ? '<i class="fa-regular fa-eye-slash"></i>' : '<i class="fa-regular fa-eye"></i>';
+      };
+    }
+
+    if (cancelBtn) cancelBtn.onclick = () => backdrop.remove();
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const fullName = backdrop.querySelector('#f-edit-driver-name').value.trim();
+      const newPassword = pwdInput.value.trim();
+      const businessId = backdrop.querySelector('#f-edit-driver-biz').value;
+      const activeStatus = Number(backdrop.querySelector('#f-edit-driver-status').value);
+
+      if (!fullName) {
+        toast("To‘liq ismni kiriting", 'warning');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
+
+      try {
+        const payload = {
+          full_name: fullName,
+          business_id: businessId ? Number(businessId) : null,
+          active: activeStatus
+        };
+        if (newPassword) {
+          payload.password = newPassword;
+        }
+
+        await API.put('/users/' + driver.id, payload);
+        backdrop.remove();
+        toast("Haydovchi ma’lumotlari muvaffaqiyatli yangilandi", 'success');
+        render();
+      } catch (err) {
+        toast(err.message || "Haydovchini yangilashda xatolik yuz berdi", 'error');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Saqlash';
+      }
+    };
+  });
+}
+
+/**
+ * Mavjud haydovchiga yangi do‘kon qo‘shish modali
+ */
+function addStoreToDriverModal(driverItem, businesses = []) {
+  const isSuperAdmin = state.user?.role === 'super_admin';
+  const isBakeryAdmin = state.user?.role === 'bakery_admin';
+
+  if (!isSuperAdmin && !isBakeryAdmin) {
+    toast("Sizda haydovchiga do‘kon biriktirish huquqi yo‘q", 'error');
+    return;
+  }
+
+  const driver = driverItem.driver;
+  const bizId = driver.business_id || (isBakeryAdmin ? state.user.business_id : (state.businesses[0]?.id || 1));
+  const bizList = businesses.length ? businesses : state.businesses;
+  const currentBizName = driverItem.assignedBizName || bizList.find(b => String(b.id) === String(bizId))?.name || (bizId ? `Nonvoyxona #${bizId}` : '');
+
+  // Avvaldan biriktirilgan do'konlar identifikatorlari
+  const alreadyAssignedStoreIds = (driverItem.specificStores || []).map(s => Number(s.store_id));
+  const hasAllStores = Boolean(driverItem.hasAllStores);
+
+  openModal(`Do‘kon qo‘shish — ${escapeHtml(driver.full_name || driver.username)}`, `
+    <form id="add-store-driver-form">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Haydovchi</label>
+          <div style="background:var(--color-surface-2); border:1px solid var(--color-border); padding:10px 14px; border-radius:var(--radius-md); font-weight:600; display:flex; align-items:center; gap:8px;">
+            <i class="fa-solid fa-id-card" style="color:var(--color-primary);"></i>
+            <span>${escapeHtml(driver.full_name || driver.username)} (@${escapeHtml(driver.username)})</span>
+          </div>
+        </div>
+
+        <div class="field span-2">
+          <label>Biriktirilgan nonvoyxona</label>
+          <div style="background:var(--color-surface-2); border:1px solid var(--color-border); padding:10px 14px; border-radius:var(--radius-md); font-weight:600; display:flex; align-items:center; gap:8px;">
+            <i class="fa-solid fa-industry" style="color:var(--color-primary);"></i>
+            <span>${escapeHtml(currentBizName)}</span>
+          </div>
+        </div>
+
+        ${hasAllStores ? `
+          <div class="field span-2">
+            <div class="alert alert-info" style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+              <i class="fa-solid fa-circle-info" style="font-size:18px;"></i>
+              <span>Ushbu haydovchi allaqachon nonvoyxonaning <strong>barcha do‘konlariga</strong> biriktirilgan.</span>
+            </div>
+          </div>
+        ` : `
+          <div class="field span-2">
+            <label>Biriktiriladigan do‘kon *</label>
+            <select id="f-new-store-select" required style="width:100%;">
+              <option value="">Do‘konlar yuklanmoqda...</option>
+            </select>
+            <div id="store-select-hint" style="color:var(--color-text-muted); font-size:11px; margin-top:4px;">
+              Faqat ushbu nonvoyxonaga tegishli faol do‘konlar ko‘rsatiladi.
+            </div>
+          </div>
+        `}
+      </div>
+
+      <div class="form-actions" style="margin-top:20px;">
+        <button type="button" class="btn btn-secondary" id="add-store-cancel-btn">Bekor qilish</button>
+        ${!hasAllStores ? `
+          <button type="submit" class="btn btn-primary" id="add-store-submit-btn">
+            <i class="fa-solid fa-check"></i> Biriktirish
+          </button>
+        ` : ''}
+      </div>
+    </form>
+  `, (backdrop) => {
+    const form = backdrop.querySelector('#add-store-driver-form');
+    const storeSelect = backdrop.querySelector('#f-new-store-select');
+    const hintEl = backdrop.querySelector('#store-select-hint');
+    const cancelBtn = backdrop.querySelector('#add-store-cancel-btn');
+    const submitBtn = backdrop.querySelector('#add-store-submit-btn');
+
+    if (cancelBtn) cancelBtn.onclick = () => backdrop.remove();
+
+    if (hasAllStores) return;
+
+    // Do'konlarni faqat ushbu haydovchiga tegishli nonvoyxona bo'yicha yuklash
+    API.get(`/stores?business_id=${bizId}`).then(res => {
+      const allStores = Array.isArray(res) ? res : (res?.data || []);
+      const activeStores = allStores.filter(s => s.active !== 0 && s.active !== false);
+
+      if (!activeStores.length) {
+        storeSelect.innerHTML = `<option value="">Bu nonvoyxonada faol do‘konlar topilmadi</option>`;
+        storeSelect.disabled = true;
+        if (submitBtn) submitBtn.disabled = true;
+        return;
+      }
+
+      const unassignedStores = activeStores.filter(s => !alreadyAssignedStoreIds.includes(Number(s.id)));
+
+      if (!unassignedStores.length) {
+        storeSelect.innerHTML = `<option value="">Barcha faol do‘konlar allaqachon biriktirilgan</option>`;
+        storeSelect.disabled = true;
+        if (submitBtn) submitBtn.disabled = true;
+        if (hintEl) hintEl.textContent = "Ushbu nonvoyxonaning barcha do‘konlari ushbu haydovchiga biriktirib bo‘lingan.";
+        return;
+      }
+
+      // Do'konlar ro'yxatini shakllantirish: avval biriktirilmaganlar, keyin disabled qilib biriktirilganlar
+      let optionsHtml = `<option value="">-- Yangi do‘konni tanlang --</option>`;
+      activeStores.forEach(s => {
+        const isAssigned = alreadyAssignedStoreIds.includes(Number(s.id));
+        const addrText = s.address ? ` (${escapeHtml(s.address)})` : '';
+        if (isAssigned) {
+          optionsHtml += `<option value="${s.id}" disabled style="color:var(--color-text-muted);">${escapeHtml(s.name)}${addrText} — allaqachon biriktirilgan</option>`;
+        } else {
+          optionsHtml += `<option value="${s.id}">${escapeHtml(s.name)}${addrText}</option>`;
+        }
+      });
+
+      storeSelect.innerHTML = optionsHtml;
+      storeSelect.disabled = false;
+    }).catch(err => {
+      storeSelect.innerHTML = `<option value="">Do‘konlarni yuklab bo‘lmadi: ${escapeHtml(err.message || 'Xatolik')}</option>`;
+      storeSelect.disabled = true;
+      if (submitBtn) submitBtn.disabled = true;
+    });
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const selectedStoreId = storeSelect ? storeSelect.value : null;
+
+      if (!selectedStoreId) {
+        toast("Iltimos, biriktiriladigan do‘konni tanlang", 'warning');
+        return;
+      }
+
+      // Takroran biriktirishni oldini olish
+      if (alreadyAssignedStoreIds.includes(Number(selectedStoreId))) {
+        toast("Bu do‘kon allaqachon ushbu haydovchiga biriktirilgan", 'warning');
+        return;
+      }
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Biriktirilmoqda...';
+      }
+
+      try {
+        const payload = {
+          delivery_user_id: Number(driver.id),
+          business_id: Number(bizId),
+          store_id: Number(selectedStoreId)
+        };
+
+        await API.post('/delivery-assignments', payload);
+        backdrop.remove();
+        toast("Do‘kon muvaffaqiyatli biriktirildi", 'success');
+        render();
+      } catch (err) {
+        toast(err.message || "Do‘konni biriktirishda xatolik yuz berdi", 'error');
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
+        }
+      }
+    };
+  });
+}
