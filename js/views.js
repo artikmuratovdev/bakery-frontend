@@ -1579,7 +1579,7 @@ async function renderOrders(content) {
                 <th>Mahsulotlar</th>
                 <th>Izoh</th>
                 <th>Status</th>
-                <th style="width:90px; text-align:right;">Amallar</th>
+                <th style="min-width:${isSuperAdmin ? '180px' : '90px'}; text-align:right;">Amallar</th>
               </tr>
             </thead>
             <tbody>
@@ -1598,10 +1598,27 @@ async function renderOrders(content) {
                       ${escapeHtml(o.note || '—')}
                     </td>
                     <td>${orderStatusBadge(o.status)}</td>
-                    <td style="text-align:right;">
-                      <button class="btn btn-secondary btn-sm" data-view-order="${o.id}">
-                        <i class="fa-solid fa-eye"></i> Ko'rish
-                      </button>
+                    <td style="text-align:right; white-space:nowrap;">
+                      <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end;">
+                        ${isSuperAdmin ? `
+                          ${o.status === 'pending' ? `
+                            <button class="btn btn-primary btn-sm" data-approve-order="${o.id}" title="Zakazni tasdiqlash">
+                              <i class="fa-solid fa-check"></i> Tasdiqlash
+                            </button>
+                          ` : (o.status === 'approved' ? `
+                            <span class="badge badge-blue" style="font-size:11px; padding:5px 8px; display:inline-flex; align-items:center; gap:4px;" title="Zakaz allaqachon tasdiqlangan">
+                              <i class="fa-solid fa-circle-check"></i> Tasdiqlangan
+                            </span>
+                          ` : (o.status === 'rejected' ? `
+                            <button class="btn btn-secondary btn-sm" data-approve-order="${o.id}" title="Qayta tasdiqlash">
+                              <i class="fa-solid fa-rotate-left"></i> Tasdiqlash
+                            </button>
+                          ` : ''))}
+                        ` : ''}
+                        <button class="btn btn-secondary btn-sm" data-view-order="${o.id}" title="Batafsil ko'rish">
+                          <i class="fa-solid fa-eye"></i> Ko'rish
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 `;
@@ -1654,6 +1671,31 @@ async function renderOrders(content) {
     const emptyNewBtn = content.querySelector('#empty-add-order-btn');
     if (emptyNewBtn) {
       emptyNewBtn.onclick = () => orderCreateModal(() => renderOrders(content));
+    }
+
+    // Katta admin uchun har bir zakazni bevosita tasdiqlash
+    if (isSuperAdmin) {
+      content.querySelectorAll('[data-approve-order]').forEach(btn => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          const orderId = btn.dataset.approveOrder;
+          btn.disabled = true;
+          const origHtml = btn.innerHTML;
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+          try {
+            await API.patch(`/orders/${orderId}/status`, {
+              status: 'approved'
+            });
+            toast(`Zakaz #${orderId} muvaffaqiyatli tasdiqlandi`, 'success');
+            await renderOrders(content);
+          } catch (err) {
+            toast(err.message || "Zakazni tasdiqlashda xatolik yuz berdi", 'error');
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+          }
+        };
+      });
     }
 
     content.querySelectorAll('[data-view-order]').forEach(btn => {
@@ -1921,17 +1963,22 @@ function orderDetailModal(order, onUpdate) {
     ${isSuperAdmin ? `
       <div style="background:var(--color-surface-muted); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:14px; margin-bottom:14px;">
         <label style="font-weight:600; font-size:var(--text-sm); display:block; margin-bottom:8px;">
-          Zakaz statusini o'zgartirish
+          Zakaz statusini boshqarish
         </label>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          ${order.status === 'pending' ? `
+            <button class="btn btn-primary" id="modal-quick-approve-btn" style="flex-shrink:0;">
+              <i class="fa-solid fa-check"></i> Zakazni tasdiqlash
+            </button>
+          ` : ''}
           <select id="modal-order-status" style="flex:1; min-width:180px; height:38px;">
             <option value="pending" ${order.status === 'pending' ? 'selected' : ''}>Kutilmoqda (pending)</option>
             <option value="approved" ${order.status === 'approved' ? 'selected' : ''}>Tasdiqlandi (approved)</option>
             <option value="rejected" ${order.status === 'rejected' ? 'selected' : ''}>Rad etildi (rejected)</option>
             <option value="completed" ${order.status === 'completed' ? 'selected' : ''}>Bajarildi (completed)</option>
           </select>
-          <button class="btn btn-primary" id="save-status-btn">
-            <i class="fa-solid fa-check"></i> Statusni saqlash
+          <button class="btn btn-secondary" id="save-status-btn">
+            <i class="fa-solid fa-floppy-disk"></i> Statusni saqlash
           </button>
         </div>
       </div>
@@ -1944,6 +1991,24 @@ function orderDetailModal(order, onUpdate) {
     m.querySelector('#modal-close-order-btn').onclick = () => m.remove();
 
     if (isSuperAdmin) {
+      const quickApproveBtn = m.querySelector('#modal-quick-approve-btn');
+      if (quickApproveBtn) {
+        quickApproveBtn.onclick = async () => {
+          quickApproveBtn.disabled = true;
+          quickApproveBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Tasdiqlanmoqda...`;
+          try {
+            await API.patch(`/orders/${order.id}/status`, { status: 'approved' });
+            toast(`Zakaz #${order.id} muvaffaqiyatli tasdiqlandi`, 'success');
+            m.remove();
+            if (onUpdate) onUpdate();
+          } catch (err) {
+            toast(err.message || "Zakazni tasdiqlashda xatolik", 'error');
+            quickApproveBtn.disabled = false;
+            quickApproveBtn.innerHTML = `<i class="fa-solid fa-check"></i> Zakazni tasdiqlash`;
+          }
+        };
+      }
+
       const saveBtn = m.querySelector('#save-status-btn');
       const statusSelect = m.querySelector('#modal-order-status');
 
@@ -1960,9 +2025,9 @@ function orderDetailModal(order, onUpdate) {
           m.remove();
           if (onUpdate) onUpdate();
         } catch (err) {
-          toast(err.message || "Statusni o'zgartirishda xatolik", 'danger');
+          toast(err.message || "Statusni o'zgartirishda xatolik", 'error');
           saveBtn.disabled = false;
-          saveBtn.innerHTML = `<i class="fa-solid fa-check"></i> Statusni saqlash`;
+          saveBtn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> Statusni saqlash`;
         }
       };
     }
@@ -2005,15 +2070,19 @@ function getItemDeliveryStats(item) {
   let delivered = 0;
   let deliveryDate = null;
 
-  if (typeof item.delivered_quantity === 'number') {
-    delivered = item.delivered_quantity;
+  // Backend Prisma: item.delivery = { id, quantity, cash_amount, credit_amount, delivered_at }
+  if (item.delivery && typeof item.delivery.quantity === 'number') {
+    delivered = Number(item.delivery.quantity) || 0;
+    deliveryDate = item.delivery.delivered_at || item.delivery.created_at;
+  } else if (typeof item.delivered_quantity === 'number') {
+    delivered = Number(item.delivered_quantity) || 0;
   } else if (typeof item.delivered_qty === 'number') {
-    delivered = item.delivered_qty;
+    delivered = Number(item.delivered_qty) || 0;
   } else if (typeof item.delivered === 'number') {
-    delivered = item.delivered;
+    delivered = Number(item.delivered) || 0;
   } else if (Array.isArray(item.deliveries) && item.deliveries.length) {
     delivered = item.deliveries.reduce((sum, d) => sum + (Number(d.quantity) || 0), 0);
-    deliveryDate = item.deliveries[0]?.created_at || item.deliveries[0]?.createdAt;
+    deliveryDate = item.deliveries[0]?.delivered_at || item.deliveries[0]?.created_at || item.deliveries[0]?.createdAt;
   }
 
   if (!deliveryDate) {
@@ -2022,14 +2091,16 @@ function getItemDeliveryStats(item) {
 
   const ordered = Number(item.quantity) || 0;
   const remaining = Math.max(0, ordered - delivered);
-  const isDelivered = delivered >= ordered && ordered > 0;
+  const isDelivered = (item.delivery !== undefined && item.delivery !== null) || (delivered >= ordered && ordered > 0);
 
   return {
     ordered,
     delivered,
     remaining,
     isDelivered,
-    deliveryDate
+    deliveryDate,
+    cashAmount: item.delivery?.cash_amount || 0,
+    creditAmount: item.delivery?.credit_amount || 0
   };
 }
 
@@ -2086,18 +2157,22 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
 
     ordersList.forEach(order => {
       const items = order.items || order.order_items || order.OrderItems || [];
+      const isDone = order.status === 'completed' || order.status === 'delivered';
       let orderHasRemaining = false;
 
       items.forEach(it => {
         const stats = getItemDeliveryStats(it);
-        totalRemainingQty += stats.remaining;
-        totalDeliveredQty += stats.delivered;
-        if (stats.remaining > 0) {
-          orderHasRemaining = true;
+        if (isDone) {
+          // Bajarilgan zakazlarda yetkazilgan nonlar hisobiga qo'shiladi, qolgan esa 0
+          totalDeliveredQty += (stats.delivered || stats.ordered);
+        } else {
+          totalRemainingQty += stats.remaining;
+          totalDeliveredQty += stats.delivered;
+          if (stats.remaining > 0) {
+            orderHasRemaining = true;
+          }
         }
       });
-
-      const isDone = order.status === 'completed' || order.status === 'delivered';
 
       // Faol zakazlar: statusi approved bo'lgan va hali berilishi kerak bo'lgan zakazlar
       if (!isDone && order.status === 'approved' && (orderHasRemaining || items.length === 0)) {
@@ -2253,62 +2328,127 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       };
     }
 
-    // Har bir mahsulot uchun miqdor kiritish va tasdiqlash
-    content.querySelectorAll('.delivery-confirm-btn, .delivery-submit-btn').forEach(btn => {
-      btn.onclick = async () => {
-        const orderId = btn.dataset.orderId;
-        const itemId = btn.dataset.itemId;
-        const maxQty = Number(btn.dataset.maxQty) || 0;
-        const card = btn.closest('.delivery-item-card');
-        const input = card?.querySelector('.delivery-qty-input');
+    // Har bir mahsulot uchun zakaz topshirish formasi
+    content.querySelectorAll('.delivery-item-form').forEach(form => {
+      const orderId = form.dataset.orderId;
+      const itemId = form.dataset.itemId;
+      const unitPrice = Number(form.dataset.unitPrice) || 0;
+      const maxQty = Number(form.dataset.maxQty) || 0;
 
-        if (!input) return;
+      const qtyInput = form.querySelector('.delivery-qty-input');
+      const totalInput = form.querySelector('.delivery-total-input');
+      const cashInput = form.querySelector('.delivery-cash-input');
+      const creditInput = form.querySelector('.delivery-credit-input');
+      const submitBtn = form.querySelector('.delivery-confirm-btn');
 
-        const qty = parseInt(input.value, 10);
+      if (!qtyInput || !totalInput || !cashInput || !creditInput || !submitBtn) return;
 
+      // Miqdor o‘zgarganda jami summa avtomatik yangilansin: quantity × product.unit_price
+      qtyInput.oninput = () => {
+        if (/^0[0-9]+/.test(qtyInput.value)) {
+          qtyInput.value = qtyInput.value.replace(/^0+/, '');
+        }
+        const qty = parseInt(qtyInput.value, 10) || 0;
+        const total = Math.max(0, qty * unitPrice);
+        totalInput.value = fmtMoney(total) + " so‘m";
+        totalInput.dataset.rawTotal = total;
+
+        const currentCash = parseFloat(cashInput.value) || 0;
+        if (currentCash > 0 && currentCash <= total) {
+          creditInput.value = Math.max(0, total - currentCash);
+        } else {
+          creditInput.value = total;
+          cashInput.value = '';
+        }
+      };
+
+      // Naqd summa o‘zgarganda nasiyani avtomatik hisoblash
+      cashInput.oninput = () => {
+        if (/^0[0-9]+/.test(cashInput.value)) {
+          cashInput.value = cashInput.value.replace(/^0+/, '');
+        }
+        const qty = parseInt(qtyInput.value, 10) || 0;
+        const total = Math.max(0, qty * unitPrice);
+        const cash = parseFloat(cashInput.value) || 0;
+        creditInput.value = Math.max(0, total - cash);
+      };
+
+      // Nasiya summa o‘zgarganda naqdni avtomatik hisoblash
+      creditInput.oninput = () => {
+        if (/^0[0-9]+/.test(creditInput.value)) {
+          creditInput.value = creditInput.value.replace(/^0+/, '');
+        }
+        const qty = parseInt(qtyInput.value, 10) || 0;
+        const total = Math.max(0, qty * unitPrice);
+        const credit = parseFloat(creditInput.value) || 0;
+        cashInput.value = Math.max(0, total - credit);
+      };
+
+      // Form topshirish (Tasdiqlash)
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+
+        const qty = parseInt(qtyInput.value, 10);
+        const cash = parseFloat(cashInput.value);
+        const credit = parseFloat(creditInput.value);
+
+        // 1. quantity musbat butun son bo‘lsin
         if (isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
-          toast("Iltimos, musbat butun son kiriting (masalan: 10, 50)", 'warning');
-          input.focus();
+          toast("Iltimos, berilgan miqdorni musbat butun son sifatida kiriting", 'warning');
+          qtyInput.focus();
           return;
         }
 
         if (qty > maxQty) {
-          toast(`Kiritilgan miqdor qolgan zakaz miqdoridan (${maxQty} dona) oshmasligi kerak`, 'warning');
-          input.focus();
+          toast(`Berilgan miqdor qolgan zakaz miqdoridan (${maxQty} dona) oshmasligi kerak`, 'warning');
+          qtyInput.focus();
           return;
         }
 
-        btn.disabled = true;
-        input.disabled = true;
-        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
+        // 2. cash_amount 0 yoki undan katta bo‘lsin
+        if (isNaN(cash) || cash < 0) {
+          toast("Naqd summa 0 yoki undan katta bo‘lishi kerak", 'warning');
+          cashInput.focus();
+          return;
+        }
+
+        // 3. credit_amount 0 yoki undan katta bo‘lsin
+        if (isNaN(credit) || credit < 0) {
+          toast("Nasiya summa 0 yoki undan katta bo‘lishi kerak", 'warning');
+          creditInput.focus();
+          return;
+        }
+
+        // 4. cash_amount + credit_amount = quantity × unit_price
+        const total = qty * unitPrice;
+        if (Math.abs(cash + credit - total) > 0.01) {
+          toast("Naqd va nasiya summasi jami qiymatga teng bo‘lishi kerak.", 'warning');
+          return;
+        }
+
+        submitBtn.disabled = true;
+        qtyInput.disabled = true;
+        cashInput.disabled = true;
+        creditInput.disabled = true;
+        submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
 
         try {
           await API.post(`/deliveries/orders/${orderId}/items/${itemId}`, {
-            quantity: qty
+            quantity: qty,
+            cash_amount: cash,
+            credit_amount: credit
           });
 
-          toast("Berilgan miqdor saqlandi", 'success');
+          toast("Delivery muvaffaqiyatli saqlandi", 'success');
           // Ma'lumotlarni qayta yuklab UI ni to'liq yangilaymiz
           await loadData(true);
         } catch (err) {
-          toast(err.message || "Miqdorni saqlashda xatolik yuz berdi", 'error');
-          btn.disabled = false;
-          input.disabled = false;
-          btn.innerHTML = `<i class="fa-solid fa-check"></i> Tasdiqlash`;
-        }
-      };
-    });
-
-    // Qty inputida Enter tugmasi bosilganda tasdiqlashni chaqirish
-    content.querySelectorAll('.delivery-qty-input').forEach(input => {
-      input.onkeydown = (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const card = input.closest('.delivery-item-card');
-          const btn = card?.querySelector('.delivery-confirm-btn, .delivery-submit-btn');
-          if (btn && !btn.disabled) {
-            btn.click();
-          }
+          toast(err.message || "Deliveryni saqlashda xatolik yuz berdi", 'error');
+          submitBtn.disabled = false;
+          qtyInput.disabled = false;
+          cashInput.disabled = false;
+          creditInput.disabled = false;
+          submitBtn.innerHTML = `<i class="fa-solid fa-check"></i> Tasdiqlash`;
         }
       };
     });
@@ -2381,8 +2521,11 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         <div class="delivery-items-list">
           ${items.map(item => {
             const prodName = item.product?.name || item.product_name || item.name || ('Mahsulot #' + item.product_id);
+            const unitPrice = Number(item.unit_price) || Number(item.product?.price) || 0;
             const stats = getItemDeliveryStats(item);
             const isItemDelivered = isOrderDone || stats.isDelivered;
+            const initialQty = stats.remaining;
+            const initialTotal = initialQty * unitPrice;
 
             return `
               <div class="delivery-item-card ${isItemDelivered ? 'is-delivered' : ''}">
@@ -2390,33 +2533,65 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                   <div class="delivery-item-name">
                     <i class="fa-solid fa-bread-slice" style="color:var(--color-primary); margin-right:6px;"></i>
                     ${escapeHtml(prodName)}
+                    ${unitPrice > 0 ? `<span style="font-size:12px; color:var(--color-text-muted); font-weight:normal; margin-left:6px;">(${fmtMoney(unitPrice)} so‘m/dona)</span>` : ''}
                   </div>
                   <div class="delivery-item-stats">
                     <span>Zakaz: <strong>${fmtNum(stats.ordered)} dona</strong></span>
-                    <span>Berilgan: <strong style="color:var(--color-green);">${fmtNum(stats.delivered)} dona</strong></span>
                     ${!isItemDelivered ? `
                       <span>Qolgan: <strong style="color:var(--color-primary);">${fmtNum(stats.remaining)} dona</strong></span>
-                    ` : ''}
+                    ` : `
+                      <span>Berilgan: <strong style="color:var(--color-green);">${fmtNum(stats.delivered || stats.ordered)} dona</strong></span>
+                    `}
                   </div>
                 </div>
 
-                <div class="delivery-item-action">
-                  ${isItemDelivered ? `
+                ${isItemDelivered ? `
+                  <div class="delivery-completed-panel">
                     <div class="delivery-completed-badge">
                       <i class="fa-solid fa-circle-check"></i>
                       <span>Yetkazildi: <strong>${fmtNum(stats.delivered || stats.ordered)} dona</strong></span>
-                      ${stats.deliveryDate ? `<small style="opacity:0.85; margin-left:4px;">(${formatDateTime(stats.deliveryDate)})</small>` : ''}
+                      ${stats.deliveryDate ? `<small style="opacity:0.85; margin-left:6px;">(${formatDateTime(stats.deliveryDate)})</small>` : ''}
                     </div>
-                  ` : `
-                    <div style="display:flex; align-items:center; gap:6px;">
-                      <label style="font-size:var(--text-xs); color:var(--color-text-muted); font-weight:600;">Berilgan:</label>
-                      <input type="number" class="delivery-qty-input" min="1" max="${stats.remaining}" value="${stats.remaining}" step="1" aria-label="Berilgan miqdor" />
+
+                    <div class="delivery-finance-chips">
+                      <span class="chip-cash" title="Naqd summa"><i class="fa-solid fa-money-bill-wave"></i> Naqd: <strong>${fmtMoney(stats.cashAmount || 0)} so‘m</strong></span>
+                      <span class="chip-credit" title="Nasiya summa"><i class="fa-solid fa-file-invoice-dollar"></i> Nasiya: <strong>${fmtMoney(stats.creditAmount != null ? stats.creditAmount : Math.max(0, (stats.delivered || stats.ordered) * unitPrice - (stats.cashAmount || 0)))} so‘m</strong></span>
+                      <span class="chip-total" title="Jami summa"><i class="fa-solid fa-calculator"></i> Jami: <strong>${fmtMoney((stats.delivered || stats.ordered) * unitPrice)} so‘m</strong></span>
                     </div>
-                    <button class="btn btn-primary delivery-confirm-btn" data-order-id="${order.id}" data-item-id="${item.id}" data-max-qty="${stats.remaining}">
-                      <i class="fa-solid fa-check"></i> Tasdiqlash
-                    </button>
-                  `}
-                </div>
+                  </div>
+                ` : `
+                  <div class="delivery-form-container">
+                    <form class="delivery-item-form" data-order-id="${order.id}" data-item-id="${item.id}" data-unit-price="${unitPrice}" data-max-qty="${stats.remaining}">
+                      <div class="delivery-form-grid">
+                        <div class="delivery-form-field">
+                          <label>Berilgan miqdor</label>
+                          <input type="number" class="delivery-qty-input" min="1" max="${stats.remaining}" value="${stats.remaining}" step="1" required placeholder="Miqdor" />
+                        </div>
+
+                        <div class="delivery-form-field">
+                          <label>Jami summa</label>
+                          <input type="text" class="delivery-total-input" readonly value="${fmtMoney(initialTotal)} so‘m" data-raw-total="${initialTotal}" title="quantity × unit_price" />
+                        </div>
+
+                        <div class="delivery-form-field">
+                          <label>Naqd summa</label>
+                          <input type="number" class="delivery-cash-input" min="0" step="100" placeholder="0" />
+                        </div>
+
+                        <div class="delivery-form-field">
+                          <label>Nasiya summa</label>
+                          <input type="number" class="delivery-credit-input" min="0" step="100" value="${initialTotal}" placeholder="0" />
+                        </div>
+
+                        <div class="delivery-form-actions">
+                          <button type="submit" class="btn btn-primary delivery-confirm-btn">
+                            <i class="fa-solid fa-check"></i> Tasdiqlash
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+                `}
               </div>
             `;
           }).join('')}

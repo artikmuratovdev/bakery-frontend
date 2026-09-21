@@ -711,4 +711,37 @@ async function markAllNotificationsAsRead() {
   toast("Barcha bildirishnomalar o'qildi", 'success');
 }
 
+/* ===================== Global Numeric Input Sanitizer ===================== */
+// Barcha raqamli inputlarda oldidan 0 yozilib qolishini (masalan: 03000 -> 3000) bartaraf etish
+document.addEventListener('input', (e) => {
+  const target = e.target;
+  if (!target || target.tagName !== 'INPUT') return;
+  
+  const isNumeric = target.type === 'number' || 
+                    target.inputMode === 'numeric' || 
+                    target.classList.contains('delivery-cash-input') ||
+                    target.classList.contains('delivery-credit-input') ||
+                    target.classList.contains('delivery-qty-input') ||
+                    target.id === 'f-cash' || target.id === 'f-credit' || target.id === 'f-qty' || target.id === 'f-price' || target.id === 'f-amount';
+
+  if (isNumeric && typeof target.value === 'string') {
+    // Agar "03000" yoki "007" kabi boshida ortiqcha 0 bo'lsa (lekin "0." emas)
+    if (/^0[0-9]+/.test(target.value)) {
+      target.value = target.value.replace(/^0+/, '');
+      if (target.value === '') target.value = '0';
+    }
+  }
+}, true);
+
+document.addEventListener('focusin', (e) => {
+  const target = e.target;
+  if (!target || target.tagName !== 'INPUT') return;
+  
+  if (target.type === 'number' || target.inputMode === 'numeric') {
+    if (target.value === '0') {
+      target.select();
+    }
+  }
+});
+
 document.addEventListener('DOMContentLoaded', boot);

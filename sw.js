@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bek-nonlari-v19';
+const CACHE_NAME = 'bek-nonlari-v23';
 const DATA_CACHE_NAME = 'bek-nonlari-api-v1';
 
 const STATIC_ASSETS = [
