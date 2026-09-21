@@ -53,6 +53,37 @@ async function renderDashboard(content) {
 
   const bizId = effectiveBizId();
   const summary = await API.get('/dashboard/summary' + qs({ business_id: bizId }));
+  const isBakeryAdmin = state.user.role === 'bakery_admin';
+
+  if (isBakeryAdmin) {
+    content.innerHTML = `
+      <div class="section-head">
+        <h2>Umumiy ko'rinish</h2>
+        <p>Nonvoyxona bo'yicha ma'lumotlar</p>
+      </div>
+
+      <div class="grid grid-2" style="margin-bottom:20px;">
+        ${statCard('<i class="fa-solid fa-kitchen-set"></i>', 'Bugun tayyorlangan', fmtNum(summary.todayProduced) + ' dona', '', 'green')}
+        ${statCard('<i class="fa-solid fa-boxes-stacked"></i>', 'Nonvoyxonada qoldi', fmtNum(summary.remaining) + ' dona', 'Jami: ishlab chiqarilgan − tarqatilgan', '')}
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>Mahsulotlar bo'yicha balans</h3></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Mahsulot</th><th class="text-right">Tayyorlangan</th><th class="text-right">Berilgan</th><th class="text-right">Qoldi</th></tr></thead>
+          <tbody>
+            ${summary.byProduct.length ? summary.byProduct.map(p => `
+              <tr><td>${escapeHtml(p.name)}</td>
+                <td class="text-right num">${fmtNum(p.produced)}</td>
+                <td class="text-right num">${fmtNum(p.distributed)}</td>
+                <td class="text-right num">${fmtNum(p.produced - p.distributed)}</td></tr>
+            `).join('') : `<tr class="empty-row"><td colspan="4">Ma'lumot yo'q</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    `;
+    return;
+  }
 
   content.innerHTML = `
     <div class="section-head">
@@ -816,6 +847,10 @@ function productionFormModal(defaultBizId) {
 
 /* ===================== DISTRIBUTION ===================== */
 async function renderDistribution(content) {
+  if (state.user.role === 'bakery_admin') {
+    location.hash = '#/dashboard';
+    return;
+  }
   const bizId = effectiveBizId();
   if (!bizId && state.user.role === 'super_admin') {
     content.innerHTML = `<div class="alert alert-info"><i class="fa-solid fa-circle-info"></i> Taqsimlash yozuvini kiritish uchun yuqoridan aniq bitta nonvoyxonani tanlang.</div>`;
@@ -1016,6 +1051,10 @@ function distributionFormModal(defaultBizId) {
 
 /* ===================== PAYMENTS (Naqd/Nasiya) ===================== */
 async function renderPayments(content) {
+  if (state.user.role === 'bakery_admin') {
+    location.hash = '#/dashboard';
+    return;
+  }
   const bizId = effectiveBizId();
   const isAllBusinesses = state.user.role === 'super_admin' && !bizId;
   const bizName = (id) => state.businesses?.find(b => b.id == id)?.name || '';
@@ -1207,6 +1246,7 @@ async function renderDailyReport(content) {
   const bizId = effectiveBizId();
   const date = state.reportDate || todayStr();
   const data = await API.get('/reports/daily' + qs({ business_id: bizId, date }));
+  const isBakeryAdmin = state.user.role === 'bakery_admin';
 
   content.innerHTML = `
     <div class="section-head">
@@ -1217,29 +1257,31 @@ async function renderDailyReport(content) {
       <div class="field"><label>Sana</label><input type="date" id="report-date" value="${date}" /></div>
     </div>
 
-    <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="grid ${isBakeryAdmin ? 'grid-3' : 'grid-4'}" style="margin-bottom:20px;">
       ${statCard('<i class="fa-solid fa-kitchen-set"></i>', 'Tayyorlangan', fmtNum(data.totals.produced) + ' dona', '', 'green')}
       ${statCard('<i class="fa-solid fa-truck-fast"></i>', 'Berilgan', fmtNum(data.totals.distributed) + ' dona', '', 'blue')}
       ${statCard('<i class="fa-solid fa-boxes-stacked"></i>', 'Qoldi', fmtNum(data.totals.remaining) + ' dona', '', '')}
-      ${statCard('<i class="fa-solid fa-money-bill-wave"></i>', "Naqd / Nasiya", fmtMoney(data.totals.cash) + ' / ' + fmtMoney(data.totals.credit), '', '')}
+      ${!isBakeryAdmin ? statCard('<i class="fa-solid fa-money-bill-wave"></i>', "Naqd / Nasiya", fmtMoney(data.totals.cash) + ' / ' + fmtMoney(data.totals.credit), '', '') : ''}
     </div>
 
     <div class="card" style="margin-bottom:20px;">
       <div class="card-header"><h3>Ishlab chiqarish — ${fmtDate(date)}</h3></div>
       <div class="table-wrap"><table>
-        <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Mahsulot</th><th class="text-right">Soni</th><th class="text-right">Summa</th></tr></thead>
+        <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Mahsulot</th><th class="text-right">Soni</th>${!isBakeryAdmin ? '<th class="text-right">Summa</th>' : ''}</tr></thead>
         <tbody>
           ${data.production.length ? data.production.map(p => `
-            <tr>${!bizId ? `<td class="muted">${escapeHtml(p.business_name)}</td>` : ''}<td>${escapeHtml(p.product_name)}</td><td class="text-right num">${fmtNum(p.quantity)}</td><td class="text-right num">${fmtMoney(p.total_amount)}</td></tr>
-          `).join('') : `<tr class="empty-row"><td colspan="4">Ma'lumot yo'q</td></tr>`}
+            <tr>${!bizId ? `<td class="muted">${escapeHtml(p.business_name)}</td>` : ''}<td>${escapeHtml(p.product_name)}</td><td class="text-right num">${fmtNum(p.quantity)}</td>${!isBakeryAdmin ? `<td class="text-right num">${fmtMoney(p.total_amount)}</td>` : ''}</tr>
+          `).join('') : `<tr class="empty-row"><td colspan="${(!bizId ? 1 : 0) + (isBakeryAdmin ? 2 : 3)}">Ma'lumot yo'q</td></tr>`}
         </tbody>
       </table></div>
     </div>
 
+    ${!isBakeryAdmin ? `
     <div class="card">
       <div class="card-header"><h3>Do'konlarga taqsimlash — ${fmtDate(date)}</h3></div>
       ${renderDistTable(data.distribution, true)}
     </div>
+    ` : ''}
   `;
 
   content.querySelector('#report-date').onchange = (e) => { state.reportDate = e.target.value; render(); };
@@ -1251,6 +1293,7 @@ async function renderOverallReport(content) {
   const from = state.reportFrom || '';
   const to = state.reportTo || '';
   const data = await API.get('/reports/overall' + qs({ business_id: bizId, from, to }));
+  const isBakeryAdmin = state.user.role === 'bakery_admin';
 
   content.innerHTML = `
     <div class="section-head">
@@ -1263,6 +1306,24 @@ async function renderOverallReport(content) {
       <button class="btn btn-secondary btn-sm" id="clear-range">Barcha davr</button>
     </div>
 
+    ${isBakeryAdmin ? `
+    <div class="grid grid-2" style="margin-bottom:20px;">
+      ${statCard('<i class="fa-solid fa-kitchen-set"></i>', 'Ishlab chiqarilgan', fmtNum(data.totals.produced) + ' dona', '', 'green')}
+      ${statCard('<i class="fa-solid fa-boxes-stacked"></i>', 'Qoldiq', fmtNum(data.totals.remaining) + ' dona', '', '')}
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Nonvoyxona bo'yicha</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Nonvoyxona</th><th class="text-right">Tayyorlangan</th><th class="text-right">Berilgan</th></tr></thead>
+        <tbody>
+          ${data.byBusiness.length ? data.byBusiness.map(b => `
+            <tr><td>${escapeHtml(b.name)}</td><td class="text-right num">${fmtNum(b.produced)}</td><td class="text-right num">${fmtNum(b.distributed)}</td></tr>
+          `).join('') : `<tr class="empty-row"><td colspan="3">Ma'lumot yo'q</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+    ` : `
     <div class="grid grid-4" style="margin-bottom:20px;">
       ${statCard('<i class="fa-solid fa-kitchen-set"></i>', 'Ishlab chiqarilgan', fmtNum(data.totals.produced) + ' dona', '', 'green')}
       ${statCard('<i class="fa-solid fa-truck-fast"></i>', 'Tarqatilgan', fmtNum(data.totals.distributed) + ' dona', '', 'blue')}
@@ -1299,6 +1360,7 @@ async function renderOverallReport(content) {
         </table></div>
       </div>
     </div>
+    `}
   `;
 
   content.querySelector('#report-from').onchange = (e) => { state.reportFrom = e.target.value; render(); };

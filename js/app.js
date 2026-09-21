@@ -365,14 +365,8 @@ const NAV_ITEMS = {
     { group: 'Umumiy', items: [
       { href: '#/dashboard', label: 'Boshqaruv paneli', icon: '<i class="fa-solid fa-chart-pie"></i>' }
     ]},
-    { group: 'Boshqaruv', items: [
-      { href: '#/products', label: 'Mahsulotlar', icon: '<i class="fa-solid fa-bread-slice"></i>' },
-      { href: '#/stores', label: "Do‘konlar", icon: '<i class="fa-solid fa-store"></i>' },
-    ]},
     { group: 'Amaliyot', items: [
       { href: '#/production', label: 'Ishlab chiqarish', icon: '<i class="fa-solid fa-kitchen-set"></i>' },
-      { href: '#/distribution', label: 'Taqsimlash', icon: '<i class="fa-solid fa-truck-fast"></i>' },
-      { href: '#/payments', label: 'Naqd / Nasiya', icon: '<i class="fa-solid fa-wallet"></i>' },
     ]},
     { group: 'Hisobotlar', items: [
       { href: '#/reports/daily', label: 'Kunlik hisobot', icon: '<i class="fa-solid fa-calendar-day"></i>' },
@@ -426,6 +420,11 @@ async function render(isRevalidating = false) {
   }
 
   const [, view, param] = state.route.split('/');
+
+  if (state.user?.role === 'bakery_admin' && (view === 'products' || view === 'stores' || view === 'distribution' || view === 'payments')) {
+    location.hash = '#/dashboard';
+    return;
+  }
 
   const titleMap = {
     dashboard: 'Boshqaruv paneli',
