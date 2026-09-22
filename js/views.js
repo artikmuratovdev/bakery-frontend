@@ -38,9 +38,85 @@ function confirmAction(msg, onYes) {
 }
 
 function bizSelectHtml(id, selected) {
+  const list = Array.isArray(state.businesses) ? state.businesses : [];
   return `<select id="${id}">
-    ${state.businesses.map(b => `<option value="${b.id}" ${String(b.id) === String(selected) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+    ${list.map(b => `<option value="${b.id}" ${String(b.id) === String(selected) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
   </select>`;
+}
+
+/* ===================== Pagination helpers ===================== */
+function extractListData(res, defaultPage = 1, defaultLimit = 10) {
+  if (Array.isArray(res)) {
+    return {
+      items: res,
+      pagination: {
+        page: defaultPage,
+        limit: defaultLimit,
+        total: res.length,
+        totalPages: Math.max(1, Math.ceil(res.length / defaultLimit))
+      }
+    };
+  }
+  const items = Array.isArray(res?.data)
+    ? res.data
+    : (Array.isArray(res?.orders) ? res.orders : []);
+  const p = res?.pagination || {};
+  const total = Number(p.total ?? items.length) || 0;
+  const page = Number(p.page ?? defaultPage) || defaultPage;
+  const limit = Number(p.limit ?? defaultLimit) || defaultLimit;
+  const totalPages = Number(p.totalPages ?? Math.max(1, Math.ceil(total / limit))) || 1;
+
+  return {
+    items,
+    pagination: { page, limit, total, totalPages }
+  };
+}
+
+function renderPaginationHtml(pagination, prefix = 'pg') {
+  if (!pagination) return '';
+  const page = pagination.page || 1;
+  const totalPages = Math.max(1, pagination.totalPages || 1);
+  const total = pagination.total || 0;
+  const isFirst = page <= 1;
+  const isLast = page >= totalPages;
+
+  return `
+    <div class="pagination-bar" id="${prefix}-bar">
+      <div class="pagination-info">
+        Jami: <strong>${fmtNum(total)}</strong> ta &bull; Sahifa <strong>${page}</strong> / <strong>${totalPages}</strong>
+      </div>
+      <div class="pagination-controls">
+        <button type="button" class="pagination-btn pagination-prev-btn" id="${prefix}-prev-btn" ${isFirst ? 'disabled' : ''}>
+          <i class="fa-solid fa-chevron-left"></i> Oldingi
+        </button>
+        <span class="pagination-page-indicator">
+          ${page} / ${totalPages}
+        </span>
+        <button type="button" class="pagination-btn pagination-next-btn" id="${prefix}-next-btn" ${isLast ? 'disabled' : ''}>
+          Keyingi <i class="fa-solid fa-chevron-right"></i>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function bindPaginationEvents(container, pagination, onPageChange, prefix = 'pg') {
+  if (!container || !pagination) return;
+  const prevBtn = container.querySelector(`#${prefix}-prev-btn`);
+  const nextBtn = container.querySelector(`#${prefix}-next-btn`);
+  const page = pagination.page || 1;
+  const totalPages = Math.max(1, pagination.totalPages || 1);
+
+  if (prevBtn) {
+    prevBtn.onclick = () => {
+      if (page > 1) onPageChange(page - 1);
+    };
+  }
+  if (nextBtn) {
+    nextBtn.onclick = () => {
+      if (page < totalPages) onPageChange(page + 1);
+    };
+  }
 }
 
 function effectiveBizId() {
@@ -319,50 +395,75 @@ async function renderBusinesses(content) {
     content.innerHTML = `<div class="alert alert-warning">Bu sahifaga faqat Super Admin kira oladi.</div>`;
     return;
   }
-  const list = await API.get('/businesses');
-  content.innerHTML = `
-    <div class="section-head">
-      <h2>Nonvoyxonalar</h2>
-      <p>Barcha bizneslarni shu yerdan boshqaring</p>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <h3>Ro'yxat (${list.length})</h3>
-        <button class="btn btn-primary btn-sm" id="add-biz-btn">+ Yangi nonvoyxona</button>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Nomi</th><th>Manzil</th><th>Telefon</th><th>Holati</th><th></th></tr></thead>
-        <tbody>
-          ${list.map(b => `
-            <tr>
-              <td><strong>${escapeHtml(b.name)}</strong></td>
-              <td class="muted">${escapeHtml(b.address || '—')}</td>
-              <td class="muted">${escapeHtml(b.phone || '—')}</td>
-              <td>${b.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
-              <td><div class="row-actions">
-                <button class="icon-btn" data-edit="${b.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
-                <button class="icon-btn" data-del="${b.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
-              </div></td>
-            </tr>
-          `).join('') || `<tr class="empty-row"><td colspan="5">Nonvoyxona qo'shilmagan</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-  `;
 
-  content.querySelector('#add-biz-btn').onclick = () => bizFormModal();
-  content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
-    const biz = list.find(x => x.id == b.dataset.edit);
-    bizFormModal(biz);
-  });
-  content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-    confirmAction("Bu nonvoyxonani o'chirmoqchimisiz? Unga tegishli barcha ma'lumotlar (do'konlar, mahsulotlar, tarix) o'chib ketadi.", async () => {
-      await API.del('/businesses/' + b.dataset.del);
-      toast("Nonvoyxona o'chirildi", 'success');
-      state.businesses = await API.get('/businesses');
-      render();
-    });
-  });
+  let page = 1;
+  const limit = 10;
+
+  async function loadData() {
+    try {
+      const res = await API.get(`/businesses?page=${page}&limit=${limit}`);
+      const { items: list, pagination } = extractListData(res, page, limit);
+
+      content.innerHTML = `
+        <div class="section-head">
+          <h2>Nonvoyxonalar</h2>
+          <p>Barcha bizneslarni shu yerdan boshqaring</p>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>Ro'yxat (${fmtNum(pagination.total)})</h3>
+            <button class="btn btn-primary btn-sm" id="add-biz-btn">+ Yangi nonvoyxona</button>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Nomi</th><th>Manzil</th><th>Telefon</th><th>Holati</th><th></th></tr></thead>
+            <tbody>
+              ${list.map(b => `
+                <tr>
+                  <td><strong>${escapeHtml(b.name)}</strong></td>
+                  <td class="muted">${escapeHtml(b.address || '—')}</td>
+                  <td class="muted">${escapeHtml(b.phone || '—')}</td>
+                  <td>${b.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
+                  <td><div class="row-actions">
+                    <button class="icon-btn" data-edit="${b.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
+                    <button class="icon-btn" data-del="${b.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
+                  </div></td>
+                </tr>
+              `).join('') || `<tr class="empty-row"><td colspan="5">Nonvoyxona qo'shilmagan</td></tr>`}
+            </tbody>
+          </table></div>
+          ${renderPaginationHtml(pagination, 'biz-pg')}
+        </div>
+      `;
+
+      bindPaginationEvents(content, pagination, (newPage) => {
+        page = newPage;
+        loadData();
+      }, 'biz-pg');
+
+      content.querySelector('#add-biz-btn').onclick = () => bizFormModal();
+      content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+        const biz = list.find(x => x.id == b.dataset.edit);
+        bizFormModal(biz);
+      });
+      content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+        confirmAction("Bu nonvoyxonani o'chirmoqchimisiz? Unga tegishli barcha ma'lumotlar (do'konlar, mahsulotlar, tarix) o'chib ketadi.", async () => {
+          await API.del('/businesses/' + b.dataset.del);
+          toast("Nonvoyxona o'chirildi", 'success');
+          const bRes = await API.get('/businesses?limit=100');
+          state.businesses = Array.isArray(bRes) ? bRes : (bRes?.data || []);
+          render();
+        });
+      });
+    } catch (err) {
+      content.innerHTML = `
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Nonvoyxonalarni yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
+    }
+  }
+
+  await loadData();
 }
 
 function bizFormModal(biz) {
@@ -374,6 +475,15 @@ function bizFormModal(biz) {
         <div class="field span-2"><label>Nonvoyxona nomi *</label><input required id="f-name" value="${escapeHtml(biz?.name || '')}" placeholder="Masalan: Nonvoyxona №3" /></div>
         <div class="field span-2"><label>Manzil (ixtiyoriy)</label><input id="f-address" value="${escapeHtml(biz?.address || '')}" placeholder="Masalan: Chilonzor tumani, 5-mavze" /></div>
         <div class="field span-2"><label>Telefon (ixtiyoriy)</label><input type="tel" pattern="[0-9+\\-\\s()]{7,20}" id="f-phone" value="${escapeHtml(biz?.phone || '')}" placeholder="+998 90 123 45 67" title="Telefon raqami (masalan: +998 90 123 45 67)" /></div>
+        ${!isNew ? `
+          <div class="field span-2">
+            <label>Holati (Status)</label>
+            <select id="f-biz-active">
+              <option value="1" ${biz.active !== false && biz.active !== 0 ? 'selected' : ''}>Faol</option>
+              <option value="0" ${biz.active === false || biz.active === 0 ? 'selected' : ''}>Nofaol</option>
+            </select>
+          </div>
+        ` : ''}
 
         ${isNew ? `
           <div class="form-section-title"><i class="fa-solid fa-user-shield"></i> Nonvoyxona admini ma'lumotlari</div>
@@ -428,6 +538,11 @@ function bizFormModal(biz) {
         phone: phoneVal
       };
 
+      if (!isNew) {
+        const activeSel = m.querySelector('#f-biz-active');
+        if (activeSel) body.active = Number(activeSel.value);
+      }
+
       if (isNew) {
         const usernameVal = m.querySelector('#f-username').value.trim();
         const pwdInput = m.querySelector('#f-password');
@@ -467,7 +582,8 @@ function bizFormModal(biz) {
         if (pwdField) pwdField.value = '';
 
         m.remove();
-        state.businesses = await API.get('/businesses');
+        const bRes = await API.get('/businesses?limit=100');
+        state.businesses = Array.isArray(bRes) ? bRes : (bRes?.data || []);
         renderBusinessSwitcher();
         render();
       } catch (err) {
@@ -483,50 +599,73 @@ function bizFormModal(biz) {
 /* ===================== PRODUCTS ===================== */
 async function renderProducts(content) {
   const bizId = effectiveBizId();
-  const list = await API.get('/products' + qs({ business_id: bizId }));
-  const bizName = (id) => state.businesses.find(b => b.id == id)?.name || '';
+  const bizName = (id) => (Array.isArray(state.businesses) ? state.businesses : []).find(b => b.id == id)?.name || '';
 
-  content.innerHTML = `
-    <div class="section-head">
-      <h2>Mahsulot turlari</h2>
-      <p>Nonning narxi va turlarini shu yerda boshqaring</p>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <h3>Ro'yxat (${list.length})</h3>
-        <button class="btn btn-primary btn-sm" id="add-product-btn">+ Yangi mahsulot</button>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th class="text-right">Narxi</th><th>Holati</th><th></th></tr></thead>
-        <tbody>
-          ${list.map(p => `
-            <tr>
-              ${!bizId ? `<td class="muted">${escapeHtml(bizName(p.business_id))}</td>` : ''}
-              <td><strong>${escapeHtml(p.name)}</strong></td>
-              <td class="text-right num">${fmtMoney(p.price)}</td>
-              <td>${p.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
-              <td><div class="row-actions">
-                <button class="icon-btn" data-edit="${p.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
-                <button class="icon-btn" data-del="${p.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
-              </div></td>
-            </tr>
-          `).join('') || `<tr class="empty-row"><td colspan="5">Mahsulot qo'shilmagan</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-  `;
+  let page = 1;
+  const limit = 10;
 
-  content.querySelector('#add-product-btn').onclick = () => productFormModal(null, bizId);
-  content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => productFormModal(list.find(x => x.id == b.dataset.edit)));
-  content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-    confirmAction("Bu mahsulot turini o'chirmoqchimisiz?", async () => {
-      try {
-        await API.del('/products/' + b.dataset.del);
-        toast("O'chirildi", 'success');
-        render();
-      } catch (err) { toast(err.message, 'error'); }
-    });
-  });
+  async function loadData() {
+    try {
+      const res = await API.get('/products' + qs({ business_id: bizId, page, limit }));
+      const { items: list, pagination } = extractListData(res, page, limit);
+
+      content.innerHTML = `
+        <div class="section-head">
+          <h2>Mahsulot turlari</h2>
+          <p>Nonning narxi va turlarini shu yerda boshqaring</p>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>Ro'yxat (${fmtNum(pagination.total)})</h3>
+            <button class="btn btn-primary btn-sm" id="add-product-btn">+ Yangi mahsulot</button>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th class="text-right">Narxi</th><th>Holati</th><th></th></tr></thead>
+            <tbody>
+              ${list.map(p => `
+                <tr>
+                  ${!bizId ? `<td class="muted">${escapeHtml(bizName(p.business_id))}</td>` : ''}
+                  <td><strong>${escapeHtml(p.name)}</strong></td>
+                  <td class="text-right num">${fmtMoney(p.price)}</td>
+                  <td>${p.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
+                  <td><div class="row-actions">
+                    <button class="icon-btn" data-edit="${p.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
+                    <button class="icon-btn" data-del="${p.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
+                  </div></td>
+                </tr>
+              `).join('') || `<tr class="empty-row"><td colspan="5">Mahsulot qo'shilmagan</td></tr>`}
+            </tbody>
+          </table></div>
+          ${renderPaginationHtml(pagination, 'prod-pg')}
+        </div>
+      `;
+
+      bindPaginationEvents(content, pagination, (newPage) => {
+        page = newPage;
+        loadData();
+      }, 'prod-pg');
+
+      content.querySelector('#add-product-btn').onclick = () => productFormModal(null, bizId);
+      content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => productFormModal(list.find(x => x.id == b.dataset.edit)));
+      content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+        confirmAction("Bu mahsulot turini o'chirmoqchimisiz?", async () => {
+          try {
+            await API.del('/products/' + b.dataset.del);
+            toast("O'chirildi", 'success');
+            render();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+    } catch (err) {
+      content.innerHTML = `
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Mahsulotlarni yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
+    }
+  }
+
+  await loadData();
 }
 
 function productFormModal(product, defaultBizId) {
@@ -537,6 +676,15 @@ function productFormModal(product, defaultBizId) {
         ${needsBizSelect ? `<div class="field span-2"><label>Nonvoyxona</label>${bizSelectHtml('f-biz', product?.business_id || defaultBizId || state.businesses[0]?.id)}</div>` : ''}
         <div class="field span-2"><label>Mahsulot nomi</label><input required id="f-name" value="${escapeHtml(product?.name || '')}" placeholder="Masalan: 8000 so'mlik non" /></div>
         <div class="field span-2"><label>Narxi (so'm)</label><input required type="number" min="0" step="100" id="f-price" value="${product?.price ?? ''}" placeholder="Masalan: 8000" /></div>
+        ${product ? `
+          <div class="field span-2">
+            <label>Holati (Status)</label>
+            <select id="f-prod-active">
+              <option value="1" ${product.active !== false && product.active !== 0 ? 'selected' : ''}>Faol</option>
+              <option value="0" ${product.active === false || product.active === 0 ? 'selected' : ''}>Nofaol</option>
+            </select>
+          </div>
+        ` : ''}
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" id="cancel-btn">Bekor qilish</button>
@@ -551,6 +699,10 @@ function productFormModal(product, defaultBizId) {
         name: document.getElementById('f-name').value.trim(),
         price: Number(document.getElementById('f-price').value)
       };
+      if (product) {
+        const activeSel = document.getElementById('f-prod-active');
+        if (activeSel) body.active = Number(activeSel.value);
+      }
       if (needsBizSelect && !product) body.business_id = document.getElementById('f-biz').value;
       try {
         if (product) await API.put('/products/' + product.id, body);
@@ -566,57 +718,79 @@ function productFormModal(product, defaultBizId) {
 /* ===================== STORES ===================== */
 async function renderStores(content) {
   const bizId = effectiveBizId();
-  const list = await API.get('/stores' + qs({ business_id: bizId }));
-  const bizName = (id) => state.businesses.find(b => b.id == id)?.name || '';
+  const bizName = (id) => (Array.isArray(state.businesses) ? state.businesses : []).find(b => b.id == id)?.name || '';
   const canManage = state.user.role === 'super_admin' || state.user.role === 'bakery_admin';
 
-  // fetch debt summary per store quickly via distribution list is expensive; skip inline debt for list view to keep it fast
-  content.innerHTML = `
-    <div class="section-head">
-      <h2>Do'konlar</h2>
-      <p>Nonvoyxonaga biriktirilgan barcha do'konlar</p>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <h3>Ro'yxat (${list.length})</h3>
-        ${canManage ? `<button class="btn btn-primary btn-sm" id="add-store-btn">+ Yangi do'kon</button>` : ''}
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th>Manzil</th><th>Telefon</th><th>Holati</th><th></th></tr></thead>
-        <tbody>
-          ${list.map(s => `
-            <tr>
-              ${!bizId ? `<td class="muted">${escapeHtml(bizName(s.business_id))}</td>` : ''}
-              <td><a href="#/stores/${s.id}" style="color:var(--accent);font-weight:600;text-decoration:none;">${escapeHtml(s.name)}</a></td>
-              <td class="muted">${escapeHtml(s.address || '—')}</td>
-              <td class="muted">${escapeHtml(s.phone || '—')}</td>
-              <td>${s.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
-              <td><div class="row-actions">
-                <button class="icon-btn" data-view="${s.id}" title="Ko'rish"><i class="fa-solid fa-eye"></i></button>
-                ${canManage ? `
-                  <button class="icon-btn" data-edit="${s.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
-                  <button class="icon-btn" data-del="${s.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
-                ` : ''}
-              </div></td>
-            </tr>
-          `).join('') || `<tr class="empty-row"><td colspan="${!bizId ? 6 : 5}">Do'kon qo'shilmagan</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-  `;
+  let page = 1;
+  const limit = 10;
 
-  const addStoreBtn = content.querySelector('#add-store-btn');
-  if (addStoreBtn) addStoreBtn.onclick = () => storeFormModal(null, bizId);
-  content.querySelectorAll('[data-view]').forEach(b => b.onclick = () => location.hash = '#/stores/' + b.dataset.view);
-  if (canManage) {
-    content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => storeFormModal(list.find(x => x.id == b.dataset.edit)));
-    content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-      confirmAction("Bu do'konni o'chirmoqchimisiz?", async () => {
-        try { await API.del('/stores/' + b.dataset.del); toast("O'chirildi", 'success'); render(); }
-        catch (err) { toast(err.message, 'error'); }
-      });
-    });
+  async function loadData() {
+    try {
+      const res = await API.get('/stores' + qs({ business_id: bizId, page, limit }));
+      const { items: list, pagination } = extractListData(res, page, limit);
+
+      content.innerHTML = `
+        <div class="section-head">
+          <h2>Do'konlar</h2>
+          <p>Nonvoyxonaga biriktirilgan barcha do'konlar</p>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>Ro'yxat (${fmtNum(pagination.total)})</h3>
+            ${canManage ? `<button class="btn btn-primary btn-sm" id="add-store-btn">+ Yangi do'kon</button>` : ''}
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th>Manzil</th><th>Telefon</th><th>Holati</th><th></th></tr></thead>
+            <tbody>
+              ${list.map(s => `
+                <tr>
+                  ${!bizId ? `<td class="muted">${escapeHtml(bizName(s.business_id))}</td>` : ''}
+                  <td><a href="#/stores/${s.id}" style="color:var(--accent);font-weight:600;text-decoration:none;">${escapeHtml(s.name)}</a></td>
+                  <td class="muted">${escapeHtml(s.address || '—')}</td>
+                  <td class="muted">${escapeHtml(s.phone || '—')}</td>
+                  <td>${s.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
+                  <td><div class="row-actions">
+                    <button class="icon-btn" data-view="${s.id}" title="Ko'rish"><i class="fa-solid fa-eye"></i></button>
+                    ${canManage ? `
+                      <button class="icon-btn" data-edit="${s.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
+                      <button class="icon-btn" data-del="${s.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>
+                    ` : ''}
+                  </div></td>
+                </tr>
+              `).join('') || `<tr class="empty-row"><td colspan="${!bizId ? 6 : 5}">Do'kon qo'shilmagan</td></tr>`}
+            </tbody>
+          </table></div>
+          ${renderPaginationHtml(pagination, 'store-pg')}
+        </div>
+      `;
+
+      bindPaginationEvents(content, pagination, (newPage) => {
+        page = newPage;
+        loadData();
+      }, 'store-pg');
+
+      const addStoreBtn = content.querySelector('#add-store-btn');
+      if (addStoreBtn) addStoreBtn.onclick = () => storeFormModal(null, bizId);
+      content.querySelectorAll('[data-view]').forEach(b => b.onclick = () => location.hash = '#/stores/' + b.dataset.view);
+      if (canManage) {
+        content.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => storeFormModal(list.find(x => x.id == b.dataset.edit)));
+        content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+          confirmAction("Bu do'konni o'chirmoqchimisiz?", async () => {
+            try { await API.del('/stores/' + b.dataset.del); toast("O'chirildi", 'success'); render(); }
+            catch (err) { toast(err.message, 'error'); }
+          });
+        });
+      }
+    } catch (err) {
+      content.innerHTML = `
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Do'konlarni yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
+    }
   }
+
+  await loadData();
 }
 
 function storeFormModal(store, defaultBizId) {
@@ -631,6 +805,15 @@ function storeFormModal(store, defaultBizId) {
         <div class="field span-2"><label>Do'kon nomi *</label><input required id="f-name" value="${escapeHtml(store?.name || '')}" placeholder="Masalan: Do'kon №1 (Markaz)" /></div>
         <div class="field span-2"><label>Manzil (ixtiyoriy)</label><input id="f-address" value="${escapeHtml(store?.address || '')}" placeholder="Masalan: Amir Temur ko'chasi, 12" /></div>
         <div class="field span-2"><label>Telefon (ixtiyoriy)</label><input type="tel" pattern="[0-9+\\-\\s()]{7,20}" id="f-phone" value="${escapeHtml(store?.phone || '')}" placeholder="+998 90 123 45 67" title="Telefon raqami (masalan: +998 90 123 45 67)" /></div>
+        ${!isNew ? `
+          <div class="field span-2">
+            <label>Holati (Status)</label>
+            <select id="f-store-active">
+              <option value="1" ${store.active !== false && store.active !== 0 ? 'selected' : ''}>Faol</option>
+              <option value="0" ${store.active === false || store.active === 0 ? 'selected' : ''}>Nofaol</option>
+            </select>
+          </div>
+        ` : ''}
 
         ${isNew ? `
           <div class="form-section-title"><i class="fa-solid fa-user-tag"></i> Do'kon admini ma'lumotlari</div>
@@ -684,6 +867,12 @@ function storeFormModal(store, defaultBizId) {
         address: addressVal,
         phone: phoneVal
       };
+
+      if (!isNew) {
+        const activeSel = m.querySelector('#f-store-active');
+        if (activeSel) body.active = Number(activeSel.value);
+        if (store.business_id) body.business_id = Number(store.business_id);
+      }
 
       if (isNew) {
         if (isSuperAdmin) {
@@ -791,80 +980,115 @@ async function renderProduction(content) {
 }
 
 async function renderProductionList(content, bizId) {
-  const filterDate = state.prodFilterDate || '';
-  const [entries, stock] = await Promise.all([
-    API.get('/production' + qs({ business_id: bizId, date: filterDate || undefined })),
-    bizId ? API.get('/production/stock' + qs({ business_id: bizId })) : Promise.resolve([])
-  ]);
+  let page = 1;
+  const limit = 10;
+  let filterDate = state.prodFilterDate || '';
 
-  const wrap = document.createElement('div');
-  wrap.innerHTML = `
-    <div class="section-head">
-      <h2>Ishlab chiqarish</h2>
-      <p>Har kuni tayyorlangan non miqdorini kiriting</p>
-    </div>
+  async function loadData() {
+    try {
+      const [prodRes, stockRes] = await Promise.all([
+        API.get('/production' + qs({ business_id: bizId, date: filterDate || undefined, page, limit })),
+        bizId ? API.get('/production/stock' + qs({ business_id: bizId, limit: 100 })) : Promise.resolve([])
+      ]);
 
-    ${bizId ? `<div class="card" style="margin-bottom:20px;">
-      <div class="card-header"><h3>Nonvoyxonadagi joriy zaxira (balans)</h3></div>
-      <div class="grid grid-3">
-        ${stock.map(s => {
-          const pct = s.produced ? Math.round((s.remaining / s.produced) * 100) : 0;
-          const warn = s.remaining < 0;
-          const fillClass = warn ? 'danger' : (pct < 20 ? 'warning' : 'green');
-          return `<div class="card" style="padding:14px;">
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-              <strong style="font-size:13.5px;">${escapeHtml(s.product.name)}</strong>
-              <span class="badge ${warn ? 'badge-red' : (pct < 20 ? 'badge-warning' : 'badge-green')}">${fmtNum(s.remaining)} dona</span>
-            </div>
-            <div class="balance-bar"><div class="balance-bar-fill ${fillClass}" style="width:${Math.max(0, Math.min(100, pct))}%;"></div></div>
-            <div class="stat-sub" style="margin-top:8px;">Tayyorlangan: ${fmtNum(s.produced)} · Berilgan: ${fmtNum(s.distributed)}</div>
-            ${warn ? `<div class="alert alert-warning" style="margin-top:8px;margin-bottom:0;padding:8px 10px;font-size:12px;"><i class="fa-solid fa-triangle-exclamation"></i> Nomuvofiqlik: berilgan miqdor tayyorlangandan ko'p!</div>` : ''}
-          </div>`;
-        }).join('') || `<p class="muted">Mahsulot turi yo'q</p>`}
-      </div>
-    </div>` : ''}
+      const { items: entries, pagination } = extractListData(prodRes, page, limit);
+      const stock = Array.isArray(stockRes) ? stockRes : (stockRes?.data || []);
 
-    <div class="filters-bar">
-      <div class="field"><label>Sana bo'yicha filtr</label><input type="date" id="filter-date" value="${filterDate}" /></div>
-      <button class="btn btn-secondary btn-sm" id="clear-filter">Tozalash</button>
-      <div style="margin-left:auto;">
-        <button class="btn btn-primary" id="add-production-btn">+ Ishlab chiqarish qo'shish</button>
-      </div>
-    </div>
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `
+        <div class="section-head">
+          <h2>Ishlab chiqarish</h2>
+          <p>Har kuni tayyorlangan non miqdorini kiriting</p>
+        </div>
 
-    <div class="card">
-      <div class="card-header"><h3>Yozuvlar (${entries.length})</h3></div>
-      <div class="table-wrap"><table>
-        <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Sana</th><th>Mahsulot</th><th class="text-right">Soni</th><th class="text-right">Narxi</th><th class="text-right">Jami summa</th><th></th></tr></thead>
-        <tbody>
-          ${entries.length ? entries.map(e => `
-            <tr>
-              ${!bizId ? `<td class="muted">${escapeHtml(e.business_name)}</td>` : ''}
-              <td>${fmtDate(e.date)}</td>
-              <td>${escapeHtml(e.product_name)}</td>
-              <td class="text-right num">${fmtNum(e.quantity)}</td>
-              <td class="text-right num">${fmtMoney(e.unit_price)}</td>
-              <td class="text-right num"><strong>${fmtMoney(e.total_amount)}</strong></td>
-              <td><button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button></td>
-            </tr>
-          `).join('') : `<tr class="empty-row"><td colspan="7">Yozuv topilmadi</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-  `;
-  content.innerHTML = '';
-  content.appendChild(wrap);
+        ${bizId ? `<div class="card" style="margin-bottom:20px;">
+          <div class="card-header"><h3>Nonvoyxonadagi joriy zaxira (balans)</h3></div>
+          <div class="grid grid-3">
+            ${stock.map(s => {
+              const pct = s.produced ? Math.round((s.remaining / s.produced) * 100) : 0;
+              const warn = s.remaining < 0;
+              const fillClass = warn ? 'danger' : (pct < 20 ? 'warning' : 'green');
+              return `<div class="card" style="padding:14px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                  <strong style="font-size:13.5px;">${escapeHtml(s.product.name)}</strong>
+                  <span class="badge ${warn ? 'badge-red' : (pct < 20 ? 'badge-warning' : 'badge-green')}">${fmtNum(s.remaining)} dona</span>
+                </div>
+                <div class="balance-bar"><div class="balance-bar-fill ${fillClass}" style="width:${Math.max(0, Math.min(100, pct))}%;"></div></div>
+                <div class="stat-sub" style="margin-top:8px;">Tayyorlangan: ${fmtNum(s.produced)} · Berilgan: ${fmtNum(s.distributed)}</div>
+                ${warn ? `<div class="alert alert-warning" style="margin-top:8px;margin-bottom:0;padding:8px 10px;font-size:12px;"><i class="fa-solid fa-triangle-exclamation"></i> Nomuvofiqlik: berilgan miqdor tayyorlangandan ko'p!</div>` : ''}
+              </div>`;
+            }).join('') || `<p class="muted">Mahsulot turi yo'q</p>`}
+          </div>
+        </div>` : ''}
 
-  content.querySelector('#filter-date').onchange = (e) => { state.prodFilterDate = e.target.value; render(); };
-  content.querySelector('#clear-filter').onclick = () => { state.prodFilterDate = ''; render(); };
-  const addBtn = content.querySelector('#add-production-btn');
-  if (addBtn) addBtn.onclick = () => productionFormModal(bizId);
-  content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-    confirmAction("Bu yozuvni o'chirmoqchimisiz?", async () => {
-      try { await API.del('/production/' + b.dataset.del); toast("O'chirildi", 'success'); render(); }
-      catch (err) { toast(err.message, 'error'); }
-    });
-  });
+        <div class="filters-bar">
+          <div class="field"><label>Sana bo'yicha filtr</label><input type="date" id="filter-date" value="${filterDate}" /></div>
+          <button class="btn btn-secondary btn-sm" id="clear-filter">Tozalash</button>
+          <div style="margin-left:auto;">
+            <button class="btn btn-primary" id="add-production-btn">+ Ishlab chiqarish qo'shish</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Yozuvlar (${fmtNum(pagination.total)})</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Sana</th><th>Mahsulot</th><th class="text-right">Soni</th><th class="text-right">Narxi</th><th class="text-right">Jami summa</th><th></th></tr></thead>
+            <tbody>
+              ${entries.length ? entries.map(e => `
+                <tr>
+                  ${!bizId ? `<td class="muted">${escapeHtml(e.business_name)}</td>` : ''}
+                  <td>${fmtDate(e.date)}</td>
+                  <td>${escapeHtml(e.product_name)}</td>
+                  <td class="text-right num">${fmtNum(e.quantity)}</td>
+                  <td class="text-right num">${fmtMoney(e.unit_price)}</td>
+                  <td class="text-right num"><strong>${fmtMoney(e.total_amount)}</strong></td>
+                  <td><button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button></td>
+                </tr>
+              `).join('') : `<tr class="empty-row"><td colspan="7">Yozuv topilmadi</td></tr>`}
+            </tbody>
+          </table></div>
+          ${renderPaginationHtml(pagination, 'prod-list-pg')}
+        </div>
+      `;
+
+      content.innerHTML = '';
+      content.appendChild(wrap);
+
+      bindPaginationEvents(content, pagination, (newPage) => {
+        page = newPage;
+        loadData();
+      }, 'prod-list-pg');
+
+      content.querySelector('#filter-date').onchange = (e) => {
+        state.prodFilterDate = e.target.value;
+        filterDate = e.target.value;
+        page = 1;
+        loadData();
+      };
+      content.querySelector('#clear-filter').onclick = () => {
+        state.prodFilterDate = '';
+        filterDate = '';
+        page = 1;
+        loadData();
+      };
+      const addBtn = content.querySelector('#add-production-btn');
+      if (addBtn) addBtn.onclick = () => productionFormModal(bizId);
+      content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+        confirmAction("Bu yozuvni o'chirmoqchimisiz?", async () => {
+          try { await API.del('/production/' + b.dataset.del); toast("O'chirildi", 'success'); loadData(); }
+          catch (err) { toast(err.message, 'error'); }
+        });
+      });
+    } catch (err) {
+      content.innerHTML = `
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Ishlab chiqarish yozuvlarini yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
+    }
+  }
+
+  await loadData();
 }
 
 function productionFormModal(defaultBizId) {
@@ -876,7 +1100,7 @@ function productionFormModal(defaultBizId) {
         ${needsBizSelect ? `<div class="field span-2"><label>Nonvoyxona</label>${bizSelectHtml('f-biz', initialBiz)}</div>` : ''}
         <div class="field span-2"><label>Mahsulot</label><select id="f-product" required></select></div>
         <div class="field"><label>Sana</label><input type="date" id="f-date" value="${todayStr()}" required /></div>
-        <div class="field"><label>Tayyorlangan soni</label><input type="number" min="1" step="1" id="f-qty" placeholder="Masalan: 500" required /></div>
+        <div class="field"><label>Soni (dona)</label><input required type="number" min="1" step="1" id="f-qty" placeholder="Masalan: 500" /></div>
         <div class="field span-2"><div id="f-total" class="field-hint"></div></div>
       </div>
       <div class="form-actions">
@@ -887,7 +1111,8 @@ function productionFormModal(defaultBizId) {
   `, async (m) => {
     let products = [];
     async function loadProducts(bizId) {
-      products = await API.get('/products' + qs({ business_id: bizId }));
+      const pRes = await API.get('/products' + qs({ business_id: bizId, limit: 100 }));
+      products = Array.isArray(pRes) ? pRes : (pRes?.data || []);
       const sel = m.querySelector('#f-product');
       sel.innerHTML = products.map(p => `<option value="${p.id}" data-price="${p.price}">${escapeHtml(p.name)} — ${fmtMoney(p.price)}</option>`).join('') || `<option value="">Mahsulot yo'q</option>`;
       updateTotal();
@@ -939,56 +1164,88 @@ async function renderDistribution(content) {
 }
 
 async function renderDistributionList(content, bizId) {
-  const filterDate = state.distFilterDate || '';
-  const entries = await API.get('/distribution' + qs({ business_id: bizId, date: filterDate || undefined }));
+  let page = 1;
+  const limit = 10;
+  let filterDate = state.distFilterDate || '';
 
-  content.innerHTML = `
-    <div class="section-head">
-      <h2>Do'konlarga taqsimlash</h2>
-      <p>Tayyorlangan nonlarni do'konlarga bering va to'lov turini belgilang</p>
-    </div>
+  async function loadData() {
+    try {
+      const res = await API.get('/distribution' + qs({ business_id: bizId, date: filterDate || undefined, page, limit }));
+      const { items: entries, pagination } = extractListData(res, page, limit);
 
-    <div class="filters-bar">
-      <div class="field"><label>Sana bo'yicha filtr</label><input type="date" id="filter-date" value="${filterDate}" /></div>
-      <button class="btn btn-secondary btn-sm" id="clear-filter">Tozalash</button>
-      <div style="margin-left:auto;">
-        <button class="btn btn-primary" id="add-dist-btn">+ Taqsimlash kiritish</button>
-      </div>
-    </div>
+      content.innerHTML = `
+        <div class="section-head">
+          <h2>Do'konlarga taqsimlash</h2>
+          <p>Tayyorlangan nonlarni do'konlarga bering va to'lov turini belgilang</p>
+        </div>
 
-    <div class="card">
-      <div class="card-header"><h3>Yozuvlar (${entries.length})</h3></div>
-      <div class="table-wrap"><table>
-        <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Sana</th><th>Do'kon</th><th>Mahsulot</th><th class="text-right">Soni</th><th class="text-right">Jami</th><th class="text-right">Naqd</th><th class="text-right">Nasiya</th><th></th></tr></thead>
-        <tbody>
-          ${entries.length ? entries.map(e => `
-            <tr>
-              ${!bizId ? `<td class="muted">${escapeHtml(e.business_name)}</td>` : ''}
-              <td>${fmtDate(e.date)}</td>
-              <td>${escapeHtml(e.store_name)}</td>
-              <td>${escapeHtml(e.product_name)}</td>
-              <td class="text-right num">${fmtNum(e.quantity)}</td>
-              <td class="text-right num"><strong>${fmtMoney(e.total_amount)}</strong></td>
-              <td class="text-right num">${fmtMoney(e.cash_amount)}</td>
-              <td class="text-right num">${fmtMoney(e.credit_amount)}</td>
-              <td><button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button></td>
-            </tr>
-          `).join('') : `<tr class="empty-row"><td colspan="9">Yozuv topilmadi</td></tr>`}
-        </tbody>
-      </table></div>
-    </div>
-  `;
+        <div class="filters-bar">
+          <div class="field"><label>Sana bo'yicha filtr</label><input type="date" id="filter-date" value="${filterDate}" /></div>
+          <button class="btn btn-secondary btn-sm" id="clear-filter">Tozalash</button>
+          <div style="margin-left:auto;">
+            <button class="btn btn-primary" id="add-dist-btn">+ Taqsimlash kiritish</button>
+          </div>
+        </div>
 
-  content.querySelector('#filter-date').onchange = (e) => { state.distFilterDate = e.target.value; render(); };
-  content.querySelector('#clear-filter').onclick = () => { state.distFilterDate = ''; render(); };
-  const addBtn = content.querySelector('#add-dist-btn');
-  if (addBtn) addBtn.onclick = () => distributionFormModal(bizId);
-  content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-    confirmAction("Bu yozuvni o'chirmoqchimisiz?", async () => {
-      try { await API.del('/distribution/' + b.dataset.del); toast("O'chirildi", 'success'); render(); }
-      catch (err) { toast(err.message, 'error'); }
-    });
-  });
+        <div class="card">
+          <div class="card-header"><h3>Yozuvlar (${fmtNum(pagination.total)})</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Sana</th><th>Do'kon</th><th>Mahsulot</th><th class="text-right">Soni</th><th class="text-right">Jami</th><th class="text-right">Naqd</th><th class="text-right">Nasiya</th><th></th></tr></thead>
+            <tbody>
+              ${entries.length ? entries.map(e => `
+                <tr>
+                  ${!bizId ? `<td class="muted">${escapeHtml(e.business_name)}</td>` : ''}
+                  <td>${fmtDate(e.date)}</td>
+                  <td>${escapeHtml(e.store_name)}</td>
+                  <td>${escapeHtml(e.product_name)}</td>
+                  <td class="text-right num">${fmtNum(e.quantity)}</td>
+                  <td class="text-right num"><strong>${fmtMoney(e.total_amount)}</strong></td>
+                  <td class="text-right num">${fmtMoney(e.cash_amount)}</td>
+                  <td class="text-right num">${fmtMoney(e.credit_amount)}</td>
+                  <td><button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button></td>
+                </tr>
+              `).join('') : `<tr class="empty-row"><td colspan="9">Yozuv topilmadi</td></tr>`}
+            </tbody>
+          </table></div>
+          ${renderPaginationHtml(pagination, 'dist-pg')}
+        </div>
+      `;
+
+      bindPaginationEvents(content, pagination, (newPage) => {
+        page = newPage;
+        loadData();
+      }, 'dist-pg');
+
+      content.querySelector('#filter-date').onchange = (e) => {
+        state.distFilterDate = e.target.value;
+        filterDate = e.target.value;
+        page = 1;
+        loadData();
+      };
+      content.querySelector('#clear-filter').onclick = () => {
+        state.distFilterDate = '';
+        filterDate = '';
+        page = 1;
+        loadData();
+      };
+      const addBtn = content.querySelector('#add-dist-btn');
+      if (addBtn) addBtn.onclick = () => distributionFormModal(bizId);
+      content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+        confirmAction("Bu yozuvni o'chirmoqchimisiz?", async () => {
+          try { await API.del('/distribution/' + b.dataset.del); toast("O'chirildi", 'success'); loadData(); }
+          catch (err) { toast(err.message, 'error'); }
+        });
+      });
+    } catch (err) {
+      content.innerHTML = `
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Taqsimlash yozuvlarini yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
+    }
+  }
+
+  await loadData();
 }
 
 function distributionFormModal(defaultBizId) {
@@ -1024,14 +1281,15 @@ function distributionFormModal(defaultBizId) {
 
     async function loadForBiz(bizId) {
       const [loadedProducts, stores, loadedStock] = await Promise.all([
-        API.get('/products' + qs({ business_id: bizId })),
-        API.get('/stores' + qs({ business_id: bizId })),
-        API.get('/production/stock' + qs({ business_id: bizId }))
+        API.get('/products' + qs({ business_id: bizId, limit: 100 })),
+        API.get('/stores' + qs({ business_id: bizId, limit: 100 })),
+        API.get('/production/stock' + qs({ business_id: bizId, limit: 100 }))
       ]);
-      products = loadedProducts;
-      stock = loadedStock;
+      products = Array.isArray(loadedProducts) ? loadedProducts : (loadedProducts?.data || []);
+      const storeList = Array.isArray(stores) ? stores : (stores?.data || []);
+      stock = Array.isArray(loadedStock) ? loadedStock : (loadedStock?.data || []);
       m.querySelector('#f-product').innerHTML = products.map(p => `<option value="${p.id}" data-price="${p.price}">${escapeHtml(p.name)} — ${fmtMoney(p.price)}</option>`).join('') || `<option value="">Mahsulot yo'q</option>`;
-      m.querySelector('#f-store').innerHTML = stores.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('') || `<option value="">Do'kon yo'q</option>`;
+      m.querySelector('#f-store').innerHTML = storeList.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('') || `<option value="">Do'kon yo'q</option>`;
       updateStockHint();
       updateTotal();
     }
@@ -1137,11 +1395,15 @@ async function renderPayments(content) {
   const isAllBusinesses = state.user.role === 'super_admin' && !bizId;
   const bizName = (id) => state.businesses?.find(b => b.id == id)?.name || '';
 
-  const [stores, distributions, payments] = await Promise.all([
-    API.get('/stores' + qs({ business_id: bizId })),
-    API.get('/distribution' + qs({ business_id: bizId })),
-    API.get('/payments' + qs({ business_id: bizId }))
+  const [storesRes, distRes, payRes] = await Promise.all([
+    API.get('/stores' + qs({ business_id: bizId, limit: 100 })),
+    API.get('/distribution' + qs({ business_id: bizId, limit: 100 })),
+    API.get('/payments' + qs({ business_id: bizId, limit: 100 }))
   ]);
+
+  const stores = Array.isArray(storesRes) ? storesRes : (storesRes?.data || []);
+  const distributions = Array.isArray(distRes) ? distRes : (distRes?.data || []);
+  const payments = Array.isArray(payRes) ? payRes : (payRes?.data || []);
 
   const storeBizMap = {};
   stores.forEach(s => { storeBizMap[s.id] = s.business_id; });
@@ -1157,6 +1419,7 @@ async function renderPayments(content) {
   payments.forEach(p => { if (byStore[p.store_id]) byStore[p.store_id].paid += p.amount; });
   const rows = Object.values(byStore);
 
+  const totalSales = rows.reduce((s, r) => s + r.total, 0);
   const totalDebt = rows.reduce((s, r) => s + (r.credit - r.paid), 0);
   const totalCash = rows.reduce((s, r) => s + r.cash, 0);
   const totalCredit = rows.reduce((s, r) => s + r.credit, 0);
@@ -1226,7 +1489,8 @@ async function renderPayments(content) {
       <h2>Naqd / Nasiya hisob-kitobi</h2>
       <p>${isAllBusinesses ? "Barcha nonvoyxonalar bo'yicha to'lov holati va qarzdorlik" : "Har bir do'konning to'lov holati va qarzdorligi"}</p>
     </div>
-    <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="grid grid-5" style="margin-bottom:20px;">
+      ${statCard('<i class="fa-solid fa-receipt"></i>', 'Jami sotuv', fmtMoney(totalSales), '', 'primary')}
       ${statCard('<i class="fa-solid fa-money-bill-wave"></i>', 'Jami naqd', fmtMoney(totalCash), '', 'green')}
       ${statCard('<i class="fa-solid fa-clipboard-list"></i>', 'Jami nasiya', fmtMoney(totalCredit), '', 'blue')}
       ${statCard('<i class="fa-solid fa-circle-check"></i>', "Jami to'langan", fmtMoney(totalPaid), '', 'green')}
@@ -1476,253 +1740,268 @@ async function renderOrders(content) {
   const isStore = state.user.role === 'store';
   const isSuperAdmin = state.user.role === 'super_admin';
 
-  let rawOrders = [];
-  try {
-    rawOrders = await API.get('/orders');
-  } catch (err) {
-    content.innerHTML = `<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i> Zakazlarni yuklashda xatolik: ${escapeHtml(err.message)}</div>`;
-    return;
-  }
-
-  const allOrders = Array.isArray(rawOrders) ? rawOrders : (rawOrders?.orders || rawOrders?.data || []);
-
+  let page = 1;
+  const limit = 10;
   let statusFilter = state.orderStatusFilter || 'all';
   let storeFilter = state.orderStoreFilter || 'all';
   let searchFilter = state.orderSearchFilter || '';
-
-  function getFilteredOrders() {
-    return allOrders.filter(o => {
-      if (statusFilter !== 'all' && o.status !== statusFilter) return false;
-      if (isSuperAdmin && storeFilter !== 'all' && String(o.store_id || o.store?.id) !== String(storeFilter)) return false;
-      if (searchFilter) {
-        const q = searchFilter.toLowerCase();
-        const storeName = (o.store?.name || o.store_name || '').toLowerCase();
-        const note = (o.note || '').toLowerCase();
-        const itemsStr = (o.items || o.order_items || o.OrderItems || []).map(i => i.product?.name || i.product_name || '').join(' ').toLowerCase();
-        const idStr = String(o.id);
-        if (!storeName.includes(q) && !note.includes(q) && !itemsStr.includes(q) && !idStr.includes(q)) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }
-
   const storeMap = {};
-  if (isSuperAdmin) {
-    allOrders.forEach(o => {
-      const sid = o.store_id || o.store?.id;
-      const sname = o.store?.name || o.store_name;
-      if (sid && sname && !storeMap[sid]) {
-        storeMap[sid] = sname;
+
+  async function loadData() {
+    try {
+      const qParams = {
+        page,
+        limit,
+        status: statusFilter !== 'all' ? statusFilter : undefined
+      };
+      const res = await API.get('/orders' + qs(qParams));
+      const { items: allOrders, pagination } = extractListData(res, page, limit);
+
+      if (isSuperAdmin) {
+        allOrders.forEach(o => {
+          const sid = o.store_id || o.store?.id;
+          const sname = o.store?.name || o.store_name;
+          if (sid && sname && !storeMap[sid]) storeMap[sid] = sname;
+        });
       }
-    });
-  }
 
-  function draw() {
-    const filtered = getFilteredOrders();
+      // Filtrlash (store va search bo'yicha klient tomonida ham tekshirish)
+      const filtered = allOrders.filter(o => {
+        if (isSuperAdmin && storeFilter !== 'all' && String(o.store_id || o.store?.id) !== String(storeFilter)) return false;
+        if (searchFilter) {
+          const q = searchFilter.toLowerCase();
+          const storeName = (o.store?.name || o.store_name || '').toLowerCase();
+          const note = (o.note || '').toLowerCase();
+          const itemsStr = (o.items || o.order_items || o.OrderItems || []).map(i => i.product?.name || i.product_name || '').join(' ').toLowerCase();
+          const idStr = String(o.id);
+          if (!storeName.includes(q) && !note.includes(q) && !itemsStr.includes(q) && !idStr.includes(q)) {
+            return false;
+          }
+        }
+        return true;
+      });
 
-    content.innerHTML = `
-      <div class="section-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
-        <div>
-          <h2>${isStore ? "Mening zakazlarim" : "Do‘kon zakazlari"}</h2>
-          <p>${isStore ? "Nonvoyxonaga yuborilgan barcha zakazlaringiz va ularning holati" : "Do‘konlar tomonidan yuborilgan mahsulot zakazlari ro'yxati"}</p>
+      content.innerHTML = `
+        <div class="section-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2>${isStore ? "Mening zakazlarim" : "Do‘kon zakazlari"}</h2>
+            <p>${isStore ? "Nonvoyxonaga yuborilgan barcha zakazlaringiz va ularning holati" : "Do‘konlar tomonidan yuborilgan mahsulot zakazlari ro'yxati"}</p>
+          </div>
+          ${isStore ? `
+            <button class="btn btn-primary" id="open-new-order-btn">
+              <i class="fa-solid fa-plus"></i> Yangi zakaz
+            </button>
+          ` : ''}
         </div>
-        ${isStore ? `
-          <button class="btn btn-primary" id="open-new-order-btn">
-            <i class="fa-solid fa-plus"></i> Yangi zakaz
-          </button>
-        ` : ''}
-      </div>
 
-      <div class="filters-bar" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
-        <div class="field" style="min-width:170px;">
-          <label>Status bo'yicha</label>
-          <select id="orders-status-filter">
-            <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>Barcha statuslar</option>
-            <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>Kutilmoqda (pending)</option>
-            <option value="approved" ${statusFilter === 'approved' ? 'selected' : ''}>Tasdiqlandi (approved)</option>
-            <option value="rejected" ${statusFilter === 'rejected' ? 'selected' : ''}>Rad etildi (rejected)</option>
-            <option value="completed" ${statusFilter === 'completed' ? 'selected' : ''}>Bajarildi (completed)</option>
-          </select>
-        </div>
-
-        ${isSuperAdmin && Object.keys(storeMap).length ? `
-          <div class="field" style="min-width:180px;">
-            <label>Do'kon bo'yicha</label>
-            <select id="orders-store-filter">
-              <option value="all" ${storeFilter === 'all' ? 'selected' : ''}>Barcha do'konlar</option>
-              ${Object.entries(storeMap).map(([id, name]) => `
-                <option value="${id}" ${storeFilter === id ? 'selected' : ''}>${escapeHtml(name)}</option>
-              `).join('')}
+        <div class="filters-bar" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+          <div class="field" style="min-width:170px;">
+            <label>Status bo'yicha</label>
+            <select id="orders-status-filter">
+              <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>Barcha statuslar</option>
+              <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>Kutilmoqda (pending)</option>
+              <option value="approved" ${statusFilter === 'approved' ? 'selected' : ''}>Tasdiqlandi (approved)</option>
+              <option value="rejected" ${statusFilter === 'rejected' ? 'selected' : ''}>Rad etildi (rejected)</option>
+              <option value="completed" ${statusFilter === 'completed' ? 'selected' : ''}>Bajarildi (completed)</option>
             </select>
           </div>
-        ` : ''}
 
-        <div class="field" style="flex:1; min-width:200px;">
-          <label>Qidirish</label>
-          <input type="text" id="orders-search-input" placeholder="Zakaz #, do'kon, mahsulot yoki izoh..." value="${escapeHtml(searchFilter)}" />
+          ${isSuperAdmin && Object.keys(storeMap).length ? `
+            <div class="field" style="min-width:180px;">
+              <label>Do'kon bo'yicha</label>
+              <select id="orders-store-filter">
+                <option value="all" ${storeFilter === 'all' ? 'selected' : ''}>Barcha do'konlar</option>
+                ${Object.entries(storeMap).map(([id, name]) => `
+                  <option value="${id}" ${storeFilter === id ? 'selected' : ''}>${escapeHtml(name)}</option>
+                `).join('')}
+              </select>
+            </div>
+          ` : ''}
+
+          <div class="field" style="flex:1; min-width:200px;">
+            <label>Qidirish</label>
+            <input type="text" id="orders-search-input" placeholder="Zakaz #, do'kon, mahsulot yoki izoh..." value="${escapeHtml(searchFilter)}" />
+          </div>
         </div>
-      </div>
 
-      <div class="card">
-        <div class="card-header">
-          <h3>Zakazlar ro'yxati (${filtered.length})</h3>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width:60px;">#</th>
-                ${isSuperAdmin ? '<th>Do‘kon</th>' : ''}
-                <th>Sana</th>
-                <th>Mahsulotlar</th>
-                <th>Izoh</th>
-                <th>Status</th>
-                <th style="min-width:${isSuperAdmin ? '180px' : '90px'}; text-align:right;">Amallar</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filtered.length ? filtered.map(o => {
-                const storeName = o.store?.name || o.store_name || ('Do‘kon #' + (o.store_id || ''));
-                const createdDate = formatDateTime(o.created_at || o.createdAt);
-                const itemsSummary = formatOrderItemsSummary(o.items || o.order_items || o.OrderItems || []);
+        <div class="card">
+          <div class="card-header">
+            <h3>Zakazlar ro'yxati (${fmtNum(pagination.total)})</h3>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:60px;">#</th>
+                  ${isSuperAdmin ? '<th>Do‘kon</th>' : ''}
+                  <th>Sana</th>
+                  <th>Mahsulotlar</th>
+                  <th>Izoh</th>
+                  <th>Status</th>
+                  <th style="min-width:${isSuperAdmin ? '180px' : '90px'}; text-align:right;">Amallar</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filtered.length ? filtered.map(o => {
+                  const storeName = o.store?.name || o.store_name || ('Do‘kon #' + (o.store_id || ''));
+                  const createdDate = formatDateTime(o.created_at || o.createdAt);
+                  const itemsSummary = formatOrderItemsSummary(o.items || o.order_items || o.OrderItems || []);
 
-                return `
-                  <tr>
-                    <td><strong>#${o.id}</strong></td>
-                    ${isSuperAdmin ? `<td><strong>${escapeHtml(storeName)}</strong></td>` : ''}
-                    <td class="muted" style="white-space:nowrap;">${createdDate}</td>
-                    <td>${itemsSummary}</td>
-                    <td class="muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(o.note || '')}">
-                      ${escapeHtml(o.note || '—')}
-                    </td>
-                    <td>${orderStatusBadge(o.status)}</td>
-                    <td style="text-align:right; white-space:nowrap;">
-                      <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end;">
-                        ${isSuperAdmin ? `
-                          ${o.status === 'pending' ? `
-                            <button class="btn btn-primary btn-sm" data-approve-order="${o.id}" title="Zakazni tasdiqlash">
-                              <i class="fa-solid fa-check"></i> Tasdiqlash
-                            </button>
-                          ` : (o.status === 'approved' ? `
-                            <span class="badge badge-blue" style="font-size:11px; padding:5px 8px; display:inline-flex; align-items:center; gap:4px;" title="Zakaz allaqachon tasdiqlangan">
-                              <i class="fa-solid fa-circle-check"></i> Tasdiqlangan
-                            </span>
-                          ` : (o.status === 'rejected' ? `
-                            <button class="btn btn-secondary btn-sm" data-approve-order="${o.id}" title="Qayta tasdiqlash">
-                              <i class="fa-solid fa-rotate-left"></i> Tasdiqlash
-                            </button>
-                          ` : ''))}
-                        ` : ''}
-                        <button class="btn btn-secondary btn-sm" data-view-order="${o.id}" title="Batafsil ko'rish">
-                          <i class="fa-solid fa-eye"></i> Ko'rish
+                  return `
+                    <tr>
+                      <td><strong>#${o.id}</strong></td>
+                      ${isSuperAdmin ? `<td><strong>${escapeHtml(storeName)}</strong></td>` : ''}
+                      <td class="muted" style="white-space:nowrap;">${createdDate}</td>
+                      <td>${itemsSummary}</td>
+                      <td class="muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(o.note || '')}">
+                        ${escapeHtml(o.note || '—')}
+                      </td>
+                      <td>${orderStatusBadge(o.status)}</td>
+                      <td style="text-align:right; white-space:nowrap;">
+                        <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end;">
+                          ${isSuperAdmin ? `
+                            ${o.status === 'pending' ? `
+                              <button class="btn btn-primary btn-sm" data-approve-order="${o.id}" title="Zakazni tasdiqlash">
+                                <i class="fa-solid fa-check"></i> Tasdiqlash
+                              </button>
+                            ` : (o.status === 'approved' ? `
+                              <span class="badge badge-blue" style="font-size:11px; padding:5px 8px; display:inline-flex; align-items:center; gap:4px;" title="Zakaz allaqachon tasdiqlangan">
+                                <i class="fa-solid fa-circle-check"></i> Tasdiqlangan
+                              </span>
+                            ` : (o.status === 'rejected' ? `
+                              <button class="btn btn-secondary btn-sm" data-approve-order="${o.id}" title="Qayta tasdiqlash">
+                                <i class="fa-solid fa-rotate-left"></i> Tasdiqlash
+                              </button>
+                            ` : ''))}
+                          ` : ''}
+                          <button class="btn btn-secondary btn-sm" data-view-order="${o.id}" title="Batafsil ko'rish">
+                            <i class="fa-solid fa-eye"></i> Ko'rish
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('') : `
+                  <tr class="empty-row">
+                    <td colspan="${isSuperAdmin ? 7 : 6}" style="text-align:center; padding:30px 10px;">
+                      <i class="fa-solid fa-clipboard-list" style="font-size:32px; color:var(--color-border); margin-bottom:10px; display:block;"></i>
+                      <div class="muted">${searchFilter || statusFilter !== 'all' || storeFilter !== 'all' ? "Qidiruv shartlariga mos keluvchi zakaz topilmadi" : "Hozircha hech qanday zakaz kiritilmagan"}</div>
+                      ${isStore && !searchFilter && statusFilter === 'all' ? `
+                        <button class="btn btn-primary btn-sm" id="empty-add-order-btn" style="margin-top:12px;">
+                          <i class="fa-solid fa-plus"></i> Yangi zakaz yaratish
                         </button>
-                      </div>
+                      ` : ''}
                     </td>
                   </tr>
-                `;
-              }).join('') : `
-                <tr class="empty-row">
-                  <td colspan="${isSuperAdmin ? 7 : 6}" style="text-align:center; padding:36px 16px;">
-                    <i class="fa-solid fa-cart-shopping" style="font-size:32px; color:var(--color-text-muted); opacity:0.5; margin-bottom:12px; display:block;"></i>
-                    <p style="margin:0 0 10px 0; color:var(--color-text-muted);">Hozircha mos keladigan zakazlar topilmadi</p>
-                    ${isStore ? `<button class="btn btn-primary btn-sm" id="empty-add-order-btn">+ Yangi zakaz berish</button>` : ''}
-                  </td>
-                </tr>
-              `}
-            </tbody>
-          </table>
+                `}
+              </tbody>
+            </table>
+          </div>
+          ${renderPaginationHtml(pagination, 'orders-pg')}
         </div>
-      </div>
-    `;
+      `;
 
-    const statusSelect = content.querySelector('#orders-status-filter');
-    if (statusSelect) {
-      statusSelect.onchange = (e) => {
-        statusFilter = e.target.value;
-        state.orderStatusFilter = statusFilter;
-        draw();
-      };
-    }
+      bindPaginationEvents(content, pagination, (newPage) => {
+        page = newPage;
+        loadData();
+      }, 'orders-pg');
 
-    const storeSelect = content.querySelector('#orders-store-filter');
-    if (storeSelect) {
-      storeSelect.onchange = (e) => {
-        storeFilter = e.target.value;
-        state.orderStoreFilter = storeFilter;
-        draw();
-      };
-    }
+      const statusSelect = content.querySelector('#orders-status-filter');
+      if (statusSelect) {
+        statusSelect.onchange = (e) => {
+          statusFilter = e.target.value;
+          state.orderStatusFilter = statusFilter;
+          page = 1;
+          loadData();
+        };
+      }
 
-    const searchInput = content.querySelector('#orders-search-input');
-    if (searchInput) {
-      searchInput.oninput = (e) => {
-        searchFilter = e.target.value;
-        state.orderSearchFilter = searchFilter;
-        draw();
-      };
-    }
+      const storeSelect = content.querySelector('#orders-store-filter');
+      if (storeSelect) {
+        storeSelect.onchange = (e) => {
+          storeFilter = e.target.value;
+          state.orderStoreFilter = storeFilter;
+          page = 1;
+          loadData();
+        };
+      }
 
-    const newBtn = content.querySelector('#open-new-order-btn');
-    if (newBtn) {
-      newBtn.onclick = () => orderCreateModal(() => renderOrders(content));
-    }
-    const emptyNewBtn = content.querySelector('#empty-add-order-btn');
-    if (emptyNewBtn) {
-      emptyNewBtn.onclick = () => orderCreateModal(() => renderOrders(content));
-    }
+      const searchInput = content.querySelector('#orders-search-input');
+      if (searchInput) {
+        searchInput.oninput = (e) => {
+          searchFilter = e.target.value;
+          state.orderSearchFilter = searchFilter;
+          page = 1;
+          loadData();
+        };
+      }
 
-    // Katta admin uchun har bir zakazni bevosita tasdiqlash
-    if (isSuperAdmin) {
-      content.querySelectorAll('[data-approve-order]').forEach(btn => {
-        btn.onclick = async (e) => {
-          e.stopPropagation();
-          const orderId = btn.dataset.approveOrder;
-          btn.disabled = true;
-          const origHtml = btn.innerHTML;
-          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+      const newBtn = content.querySelector('#open-new-order-btn');
+      if (newBtn) {
+        newBtn.onclick = () => orderCreateModal(() => loadData());
+      }
+      const emptyNewBtn = content.querySelector('#empty-add-order-btn');
+      if (emptyNewBtn) {
+        emptyNewBtn.onclick = () => orderCreateModal(() => loadData());
+      }
 
-          try {
-            await API.patch(`/orders/${orderId}/status`, {
-              status: 'approved'
-            });
-            toast(`Zakaz #${orderId} muvaffaqiyatli tasdiqlandi`, 'success');
-            await renderOrders(content);
-          } catch (err) {
-            toast(err.message || "Zakazni tasdiqlashda xatolik yuz berdi", 'error');
-            btn.disabled = false;
-            btn.innerHTML = origHtml;
+      if (isSuperAdmin) {
+        content.querySelectorAll('[data-approve-order]').forEach(btn => {
+          btn.onclick = async (e) => {
+            e.stopPropagation();
+            const orderId = btn.dataset.approveOrder;
+            btn.disabled = true;
+            const origHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+            try {
+              await API.patch(`/orders/${orderId}/status`, {
+                status: 'approved'
+              });
+              toast(`Zakaz #${orderId} muvaffaqiyatli tasdiqlandi`, 'success');
+              await loadData();
+            } catch (err) {
+              toast(err.message || "Zakazni tasdiqlashda xatolik yuz berdi", 'error');
+              btn.disabled = false;
+              btn.innerHTML = origHtml;
+            }
+          };
+        });
+      }
+
+      content.querySelectorAll('[data-view-order]').forEach(btn => {
+        btn.onclick = () => {
+          const orderId = btn.dataset.viewOrder;
+          const ord = allOrders.find(x => String(x.id) === String(orderId));
+          if (ord) {
+            orderDetailModal(ord, () => loadData());
           }
         };
       });
+    } catch (err) {
+      content.innerHTML = `
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Zakazlarni yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
     }
-
-    content.querySelectorAll('[data-view-order]').forEach(btn => {
-      btn.onclick = () => {
-        const orderId = btn.dataset.viewOrder;
-        const ord = allOrders.find(x => String(x.id) === String(orderId));
-        if (ord) {
-          orderDetailModal(ord, () => renderOrders(content));
-        }
-      };
-    });
   }
 
-  draw();
+  await loadData();
 }
 
 async function orderCreateModal(onSuccess) {
   let products = [];
   try {
     const bizId = effectiveBizId();
-    products = await API.get('/products' + qs({ business_id: bizId }));
-    if (!Array.isArray(products) || !products.length) {
-      products = await API.get('/products');
+    products = await API.get('/products' + qs({ business_id: bizId, limit: 100 }));
+    const checkList = Array.isArray(products) ? products : (products?.data || []);
+    if (!checkList.length) {
+      products = await API.get('/products?limit=100');
     }
   } catch (err) {
     try {
-      products = await API.get('/products');
+      products = await API.get('/products?limit=100');
     } catch (e) {
       toast("Mahsulotlar ro'yxatini yuklab bo'lmadi", 'danger');
       return;
@@ -2040,7 +2319,7 @@ async function openOrderDetailsById(orderId) {
     try {
       order = await API.get(`/orders/${orderId}`);
     } catch (e) {
-      const all = await API.get('/orders');
+      const all = await API.get('/orders?limit=100');
       const list = Array.isArray(all) ? all : (all?.orders || all?.data || []);
       order = list.find(o => String(o.id) === String(orderId));
     }
@@ -2120,21 +2399,27 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
 
   let activeTab = currentTab === 'history' ? 'history' : 'active';
   let searchQuery = '';
-  let selectedStatus = ''; // '' = barchasi (approved + completed), 'approved', 'completed', 'delivered'
+  let selectedStatus = activeTab === 'history' ? 'completed' : 'approved';
+  let counts = { approved: null, completed: null };
   let ordersList = [];
+  let page = 1;
+  const limit = 10;
+  let currentPagination = { page: 1, limit: 10, total: 0, totalPages: 1 };
 
   async function loadData(isBackground = false) {
     try {
-      let endpoint = '/deliveries/orders';
-      if (selectedStatus) {
-        endpoint += `?status=${encodeURIComponent(selectedStatus)}`;
-      }
-      const res = await API.get(endpoint, { bypassCache: true });
-      const raw = Array.isArray(res) ? res : (res?.orders || res?.data || []);
+      // Driverdan doim status=approved yoki status=completed bo'lib ketadi
+      const currentStatus = (selectedStatus === 'completed' || activeTab === 'history') ? 'completed' : 'approved';
+      selectedStatus = currentStatus;
+      const endpoint = `/deliveries/orders?status=${encodeURIComponent(currentStatus)}&page=${page}&limit=${limit}`;
       
-      // pending va rejected zakazlar ko‘rinmaydi!
-      // Faqat approved, completed va delivered zakazlar qabul qilinadi
-      ordersList = raw.filter(o => o.status !== 'pending' && o.status !== 'rejected');
+      const res = await API.get(endpoint, { bypassCache: true });
+      const { items, pagination } = extractListData(res, page, limit);
+      
+      // Driver uchun faqat approved va completed zakazlar
+      ordersList = items.filter(o => o && o.status === currentStatus);
+      currentPagination = pagination;
+      counts[currentStatus] = pagination.total;
       renderUI();
     } catch (err) {
       if (!isBackground) {
@@ -2148,56 +2433,29 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
   }
 
   function renderUI() {
-    // Zakazlarni ajratish:
-    const activeOrders = [];
-    const historyOrders = [];
-
     let totalRemainingQty = 0;
     let totalDeliveredQty = 0;
 
     ordersList.forEach(order => {
       const items = order.items || order.order_items || order.OrderItems || [];
-      const isDone = order.status === 'completed' || order.status === 'delivered';
-      let orderHasRemaining = false;
+      const isDone = order.status === 'completed';
 
       items.forEach(it => {
         const stats = getItemDeliveryStats(it);
         if (isDone) {
-          // Bajarilgan zakazlarda yetkazilgan nonlar hisobiga qo'shiladi, qolgan esa 0
           totalDeliveredQty += (stats.delivered || stats.ordered);
         } else {
           totalRemainingQty += stats.remaining;
           totalDeliveredQty += stats.delivered;
-          if (stats.remaining > 0) {
-            orderHasRemaining = true;
-          }
         }
       });
-
-      // Faol zakazlar: statusi approved bo'lgan va hali berilishi kerak bo'lgan zakazlar
-      if (!isDone && order.status === 'approved' && (orderHasRemaining || items.length === 0)) {
-        activeOrders.push(order);
-      } else {
-        // Tarix / Yetkazilganlar: statusi completed, delivered yoki barcha mahsulotlari to'liq berilgan zakazlar
-        historyOrders.push(order);
-      }
     });
 
     // Tartiblash (sana bo'yicha eng yangisi birinchi)
-    activeOrders.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
-    historyOrders.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
-
-    let currentList = [];
-    if (selectedStatus === 'approved') {
-      currentList = activeOrders;
-    } else if (selectedStatus === 'completed' || selectedStatus === 'delivered') {
-      currentList = historyOrders;
-    } else {
-      currentList = activeTab === 'active' ? activeOrders : historyOrders;
-    }
+    ordersList.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
 
     // Qidiruv bo'yicha filtrlash
-    const filteredOrders = currentList.filter(o => {
+    const filteredOrders = ordersList.filter(o => {
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
       const storeName = (o.store?.name || o.store_name || '').toLowerCase();
@@ -2208,10 +2466,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       return storeName.includes(q) || storeAddr.includes(q) || storePhone.includes(q) || note.includes(q) || idStr.includes(q);
     });
 
+    const activeBadge = counts.approved !== null ? counts.approved : (activeTab === 'active' ? currentPagination.total : '');
+    const historyBadge = counts.completed !== null ? counts.completed : (activeTab === 'history' ? currentPagination.total : '');
+
     content.innerHTML = `
       <!-- Quick Summary Stat Cards -->
       <div class="grid grid-3" style="margin-bottom:20px;">
-        ${statCard('<i class="fa-solid fa-truck-ramp-box"></i>', 'Faol zakazlar', fmtNum(activeOrders.length) + ' ta', '', 'blue')}
+        ${statCard('<i class="fa-solid fa-truck-ramp-box"></i>', activeTab === 'active' ? 'Tasdiqlangan zakazlar' : 'Yetkazilgan zakazlar', fmtNum(currentPagination.total) + ' ta', '', activeTab === 'active' ? 'blue' : 'green')}
         ${statCard('<i class="fa-solid fa-bread-slice"></i>', 'Yetkazilishi kerak', fmtNum(totalRemainingQty) + ' dona', '', 'amber')}
         ${statCard('<i class="fa-solid fa-circle-check"></i>', 'Yetkazilgan nonlar', fmtNum(totalDeliveredQty) + ' dona', '', 'green')}
       </div>
@@ -2220,24 +2481,22 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       <div class="card" style="margin-bottom:20px; padding:14px 18px;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
           <div class="delivery-tabs-wrap" style="margin-bottom:0; border-bottom:none; padding-bottom:0;">
-            <button class="delivery-tab-btn ${activeTab === 'active' && !selectedStatus ? 'active' : (selectedStatus === 'approved' ? 'active' : '')}" id="tab-active-btn">
+            <button class="delivery-tab-btn ${activeTab === 'active' ? 'active' : ''}" id="tab-active-btn">
               <i class="fa-solid fa-truck-fast"></i>
               Tasdiqlangan zakazlar
-              <span class="delivery-tab-badge">${activeOrders.length}</span>
+              ${activeBadge !== '' ? `<span class="delivery-tab-badge">${activeBadge}</span>` : ''}
             </button>
-            <button class="delivery-tab-btn ${activeTab === 'history' && !selectedStatus ? 'active' : (selectedStatus === 'completed' || selectedStatus === 'delivered' ? 'active' : '')}" id="tab-history-btn">
+            <button class="delivery-tab-btn ${activeTab === 'history' ? 'active' : ''}" id="tab-history-btn">
               <i class="fa-solid fa-clock-rotate-left"></i>
               Yetkazilganlar
-              <span class="delivery-tab-badge">${historyOrders.length}</span>
+              ${historyBadge !== '' ? `<span class="delivery-tab-badge">${historyBadge}</span>` : ''}
             </button>
           </div>
 
           <div style="display:flex; align-items:center; gap:8px; min-width:280px; flex:1; max-width:520px;">
             <select id="delivery-status-filter" style="height:38px; padding:0 8px; font-size:var(--text-xs); border-radius:var(--radius-md); border:1px solid var(--color-border); background:var(--color-surface-2); color:var(--color-text); cursor:pointer;" title="Status bo'yicha filterlash">
-              <option value="" ${!selectedStatus ? 'selected' : ''}>Barcha statuslar</option>
               <option value="approved" ${selectedStatus === 'approved' ? 'selected' : ''}>Tasdiqlangan (approved)</option>
               <option value="completed" ${selectedStatus === 'completed' ? 'selected' : ''}>Bajarilgan (completed)</option>
-              <option value="delivered" ${selectedStatus === 'delivered' ? 'selected' : ''}>Yetkazilgan (delivered)</option>
             </select>
             <input type="text" id="delivery-search-input" placeholder="Do'kon, manzil yoki zakaz # bo'yicha..." value="${escapeHtml(searchQuery)}" style="height:38px; flex:1;" />
             <button class="icon-btn" id="delivery-manual-refresh-btn" title="Yangilash" style="height:38px; width:38px; flex-shrink:0;">
@@ -2263,7 +2522,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
           </div>
         `}
       </div>
+      ${renderPaginationHtml(currentPagination, 'deliv-pg')}
     `;
+
+    bindPaginationEvents(content, currentPagination, (newPage) => {
+      page = newPage;
+      loadData();
+    }, 'deliv-pg');
 
     // Hodisalarni ulash
     const refreshBtn = content.querySelector('#delivery-manual-refresh-btn');
@@ -2283,11 +2548,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     const statusSelect = content.querySelector('#delivery-status-filter');
     if (statusSelect) {
       statusSelect.onchange = async () => {
-        selectedStatus = statusSelect.value;
-        if (selectedStatus === 'approved') {
-          activeTab = 'active';
-        } else if (selectedStatus === 'completed' || selectedStatus === 'delivered') {
-          activeTab = 'history';
+        selectedStatus = statusSelect.value === 'completed' ? 'completed' : 'approved';
+        activeTab = selectedStatus === 'completed' ? 'history' : 'active';
+        page = 1;
+        if (activeTab === 'history') {
+          location.hash = '#/delivery/history';
+        } else {
+          location.hash = '#/dashboard';
         }
         await loadData();
       };
@@ -2297,26 +2564,22 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     const tabHist = content.querySelector('#tab-history-btn');
     if (tabActive) {
       tabActive.onclick = async () => {
+        if (activeTab === 'active' && selectedStatus === 'approved') return;
         activeTab = 'active';
+        selectedStatus = 'approved';
+        page = 1;
         location.hash = '#/dashboard';
-        if (selectedStatus === 'completed' || selectedStatus === 'delivered') {
-          selectedStatus = '';
-          await loadData();
-        } else {
-          renderUI();
-        }
+        await loadData();
       };
     }
     if (tabHist) {
       tabHist.onclick = async () => {
+        if (activeTab === 'history' && selectedStatus === 'completed') return;
         activeTab = 'history';
+        selectedStatus = 'completed';
+        page = 1;
         location.hash = '#/delivery/history';
-        if (selectedStatus === 'approved') {
-          selectedStatus = '';
-          await loadData();
-        } else {
-          renderUI();
-        }
+        await loadData();
       };
     }
 
@@ -2461,15 +2724,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     const storePhone = store.phone || order.store_phone || '';
     const createdDate = formatDateTime(order.created_at || order.createdAt);
     const items = order.items || order.order_items || order.OrderItems || [];
-    const isOrderDone = order.status === 'completed' || order.status === 'delivered';
+    const isOrderDone = order.status === 'completed';
 
     let statusBadge = '';
     if (order.status === 'completed') {
       statusBadge = `<span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Bajarilgan (completed)</span>`;
-    } else if (order.status === 'delivered') {
-      statusBadge = `<span class="badge badge-green"><i class="fa-solid fa-truck-ramp-box"></i> Yetkazilgan (delivered)</span>`;
     } else if (order.status === 'approved') {
-      statusBadge = `<span class="badge badge-blue"><i class="fa-solid fa-truck-fast"></i> Tasdiqlangan</span>`;
+      statusBadge = `<span class="badge badge-blue"><i class="fa-solid fa-truck-fast"></i> Tasdiqlangan (approved)</span>`;
     } else {
       statusBadge = `<span class="badge badge-gray">${escapeHtml(order.status || '')}</span>`;
     }
@@ -2625,18 +2886,22 @@ async function renderDrivers(content) {
   }
 
   const bizId = effectiveBizId();
-  const bizParam = bizId ? `?business_id=${bizId}` : '';
+  const bizParam = bizId ? `?business_id=${bizId}&limit=100` : '?limit=100';
+
+  let page = 1;
+  const limit = 10;
+  let searchQuery = '';
 
   // Parallel yuklash
   const [assignmentsRes, usersRes, businessesRes] = await Promise.all([
     API.get('/delivery-assignments' + bizParam),
-    API.get('/users'),
-    state.businesses?.length ? state.businesses : API.get('/businesses')
+    API.get('/users?limit=100'),
+    state.businesses?.length ? state.businesses : API.get('/businesses?limit=100')
   ]);
 
-  const assignments = Array.isArray(assignmentsRes) ? assignmentsRes : (assignmentsRes?.data || []);
-  const allUsers = Array.isArray(usersRes) ? usersRes : (usersRes?.data || []);
-  const businesses = Array.isArray(businessesRes) ? businessesRes : (businessesRes?.data || []);
+  const assignments = extractListData(assignmentsRes, 1, 100).data;
+  const allUsers = extractListData(usersRes, 1, 100).data;
+  const businesses = extractListData(businessesRes, 1, 100).data;
 
   const bizName = (id) => businesses.find(b => String(b.id) === String(id))?.name || (id ? `Nonvoyxona #${id}` : '—');
 
@@ -2661,7 +2926,7 @@ async function renderDrivers(content) {
   });
 
   // Haydovchilar bo'yicha guruhlash
-  const driverDataList = drivers.map(driver => {
+  const allDriverDataList = drivers.map(driver => {
     const driverAssignments = assignments.filter(a => Number(a.delivery_user_id) === Number(driver.id));
     const hasAllStores = driverAssignments.some(a => a.store_id === null || !a.store);
     const specificStores = driverAssignments.filter(a => a.store_id !== null && a.store);
@@ -2678,9 +2943,9 @@ async function renderDrivers(content) {
   });
 
   // Statistika
-  const totalDrivers = driverDataList.length;
-  const assignedDriversCount = driverDataList.filter(d => d.assignments.length > 0).length;
-  const allStoresCount = driverDataList.filter(d => d.hasAllStores).length;
+  const totalDrivers = allDriverDataList.length;
+  const assignedDriversCount = allDriverDataList.filter(d => d.assignments.length > 0).length;
+  const allStoresCount = allDriverDataList.filter(d => d.hasAllStores).length;
 
   content.innerHTML = `
     <div class="section-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
@@ -2736,28 +3001,68 @@ async function renderDrivers(content) {
             </tr>
           </thead>
           <tbody id="drivers-tbody">
-            ${renderDriversRows(driverDataList, isSuperAdmin)}
           </tbody>
         </table>
       </div>
+      <div id="drivers-pagination-container"></div>
     </div>
   `;
+
+  function getFilteredData() {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return allDriverDataList;
+    return allDriverDataList.filter(item => {
+      const name = (item.driver.full_name || '').toLowerCase();
+      const uname = (item.driver.username || '').toLowerCase();
+      const biz = (item.assignedBizName || '').toLowerCase();
+      const stores = item.specificStores.map(s => (s.store?.name || '').toLowerCase()).join(' ');
+      return name.includes(q) || uname.includes(q) || biz.includes(q) || stores.includes(q);
+    });
+  }
+
+  function renderCurrentPage() {
+    const filtered = getFilteredData();
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    if (page > totalPages) page = totalPages;
+
+    const startIndex = (page - 1) * limit;
+    const paginated = filtered.slice(startIndex, startIndex + limit);
+
+    const tbody = content.querySelector('#drivers-tbody');
+    const badge = content.querySelector('#drivers-count-badge');
+    const paginationBox = content.querySelector('#drivers-pagination-container');
+
+    if (badge) badge.textContent = total;
+    if (tbody) tbody.innerHTML = renderDriversRows(paginated, isSuperAdmin);
+
+    const paginationMeta = {
+      page,
+      limit,
+      total,
+      totalPages
+    };
+
+    if (paginationBox) {
+      paginationBox.innerHTML = renderPaginationHtml(paginationMeta, 'drivers');
+      bindPaginationEvents(paginationBox, paginationMeta, (newPage) => {
+        page = newPage;
+        renderCurrentPage();
+      }, 'drivers');
+    }
+
+    bindDriverActions(content, allDriverDataList, businesses, isSuperAdmin);
+  }
+
+  renderCurrentPage();
 
   // Qidiruv filtri
   const searchInput = content.querySelector('#drivers-search-input');
   if (searchInput) {
     searchInput.oninput = (e) => {
-      const q = e.target.value.toLowerCase().trim();
-      const filtered = driverDataList.filter(item => {
-        const name = (item.driver.full_name || '').toLowerCase();
-        const uname = (item.driver.username || '').toLowerCase();
-        const biz = (item.assignedBizName || '').toLowerCase();
-        const stores = item.specificStores.map(s => (s.store?.name || '').toLowerCase()).join(' ');
-        return name.includes(q) || uname.includes(q) || biz.includes(q) || stores.includes(q);
-      });
-      const tbody = content.querySelector('#drivers-tbody');
-      if (tbody) tbody.innerHTML = renderDriversRows(filtered, isSuperAdmin);
-      bindDriverActions(content, driverDataList, businesses, isSuperAdmin);
+      searchQuery = e.target.value;
+      page = 1;
+      renderCurrentPage();
     };
   }
 
@@ -2766,9 +3071,6 @@ async function renderDrivers(content) {
   if (addBtn && isSuperAdmin) {
     addBtn.onclick = () => driverFormModal(bizId, businesses);
   }
-
-  // Amallarni ulash
-  bindDriverActions(content, driverDataList, businesses, isSuperAdmin);
 }
 
 function renderDriversRows(driverDataList, isSuperAdmin = false) {
@@ -3079,7 +3381,7 @@ function driverFormModal(defaultBizId, businesses = []) {
       pickerWrapper.innerHTML = `<div class="stores-picker-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Do‘konlar yuklanmoqda...</div>`;
 
       try {
-        const list = await API.get(`/stores?business_id=${selectedBizId}`);
+        const list = await API.get(`/stores?business_id=${selectedBizId}&limit=100`);
         loadedStores = Array.isArray(list) ? list : (list?.data || []);
 
         if (!loadedStores.length) {
@@ -3385,7 +3687,7 @@ function addStoreToDriverModal(driverItem, businesses = []) {
     if (hasAllStores) return;
 
     // Do'konlarni faqat ushbu haydovchiga tegishli nonvoyxona bo'yicha yuklash
-    API.get(`/stores?business_id=${bizId}`).then(res => {
+    API.get(`/stores?business_id=${bizId}&limit=100`).then(res => {
       const allStores = Array.isArray(res) ? res : (res?.data || []);
       const activeStores = allStores.filter(s => s.active !== 0 && s.active !== false);
 

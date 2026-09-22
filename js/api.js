@@ -1,5 +1,5 @@
-// const API_BASE ="https://bakery-system-q9nt.onrender.com/api";
-const API_BASE ="http://localhost:5000/api";
+const API_BASE ="https://bakery-system-q9nt.onrender.com/api";
+// const API_BASE ="http://localhost:5000/api";
 
 function parseBackendError(data, res, rawText) {
   if (data) {
@@ -263,7 +263,8 @@ const API = {
 
     const opts = {
       method,
-      headers
+      headers,
+      credentials: 'include'
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
 
@@ -434,7 +435,8 @@ const API = {
   post(url, body) { return this.request('POST', url, body); },
   put(url, body) { return this.request('PUT', url, body); },
   patch(url, body) { return this.request('PATCH', url, body); },
-  del(url) { return this.request('DELETE', url); }
+  del(url) { return this.request('DELETE', url); },
+  checkHeartbeat() { return this.get('/heartbeat', { bypassCache: true }); }
 };
 
 function qs(params) {

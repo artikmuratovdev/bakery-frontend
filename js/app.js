@@ -310,7 +310,8 @@ async function afterLogin() {
   }
 
   if (state.user.role === 'super_admin') {
-    state.businesses = await API.get('/businesses');
+    const bRes = await API.get('/businesses?limit=100');
+    state.businesses = Array.isArray(bRes) ? bRes : (bRes?.data || []);
   } else {
     state.currentBusinessId = state.user.business_id;
   }
@@ -610,7 +611,7 @@ function stopNotificationPolling() {
 async function fetchNotifications(isPoll = false) {
   if (state.user?.role !== 'super_admin') return;
   try {
-    const list = await API.get('/orders/notifications?unread=true', { bypassCache: true });
+    const list = await API.get('/orders/notifications?unread=true&limit=100', { bypassCache: true });
     currentNotifications = Array.isArray(list) ? list : (list?.notifications || list?.data || []);
     renderNotificationsUI();
   } catch (err) {
