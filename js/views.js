@@ -2968,16 +2968,49 @@ async function renderDrivers(content) {
   // 4. Haydovchilar bo'yicha ma'lumotlarni map qilish (biriktiruvlar, do'konlar va nonvoyxona bilan boyitish)
   const allDriverDataList = drivers.map(driver => {
     const driverAssignments = assignments.filter(a => Number(a.delivery_user_id || a.delivery_user?.id) === Number(driver.id));
-    const hasAllStores = driverAssignments.some(a => a.store_id === null || a.store_id === undefined || a.all_stores === true || a.all_stores === 1 || !a.store);
-    const specificStores = driverAssignments.filter(a => a.store_id !== null && a.store_id !== undefined && !a.all_stores);
+    
+    // Nonvoyxonalar bo'yicha guruhlash
+    const bizGroups = {};
+    driverAssignments.forEach(a => {
+      const bId = Number(a.business_id || a.business?.id);
+      if (!bId) return;
+      if (!bizGroups[bId]) {
+        bizGroups[bId] = {
+          bizId: bId,
+          bizName: a.business?.name || bizName(bId),
+          hasAllStores: false,
+          allStoresAssignmentId: null,
+          stores: []
+        };
+      }
+      if (a.store_id === null || a.store_id === undefined || a.all_stores === true || a.all_stores === 1 || !a.store) {
+        bizGroups[bId].hasAllStores = true;
+        bizGroups[bId].allStoresAssignmentId = a.id;
+      } else {
+        bizGroups[bId].stores.push(a);
+      }
+    });
+
+    const assignedBizIds = Object.keys(bizGroups).map(Number);
+    if (assignedBizIds.length === 0 && driver.business_id) {
+      assignedBizIds.push(Number(driver.business_id));
+    }
+
+    const totalBizCount = businesses.length;
+    const isAllBiz = totalBizCount > 0 && businesses.every(b => assignedBizIds.includes(Number(b.id)));
+    const isAllStoresEverywhere = isAllBiz && businesses.every(b => bizGroups[b.id]?.hasAllStores);
+    const hasAnyAllStores = Object.values(bizGroups).some(g => g.hasAllStores);
     const assignedBizName = driver.business_name || bizName(driver.business_id) || driverAssignments[0]?.business?.name || '—';
 
     return {
       driver,
       assignments: driverAssignments,
-      hasAllStores,
-      allStoresAssignmentId: driverAssignments.find(a => a.store_id === null || a.store_id === undefined || a.all_stores || !a.store)?.id,
-      specificStores,
+      bizGroups,
+      assignedBizIds,
+      isAllBiz,
+      isAllStoresEverywhere,
+      hasAllStores: hasAnyAllStores || isAllStoresEverywhere,
+      specificStores: driverAssignments.filter(a => a.store_id !== null && a.store_id !== undefined && !a.all_stores),
       assignedBizName
     };
   });
@@ -2985,15 +3018,18 @@ async function renderDrivers(content) {
   // Statistika
   const totalDrivers = allDriverDataList.length;
   const assignedDriversCount = allDriverDataList.filter(d => d.assignments.length > 0).length;
-  const allStoresCount = allDriverDataList.filter(d => d.hasAllStores).length;
+  const allStoresCount = allDriverDataList.filter(d => d.hasAllStores || d.isAllStoresEverywhere).length;
 
   content.innerHTML = `
     <div class="section-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
       <div>
         <h2>Haydovchilar boshqaruvi</h2>
-        <p>Dostavkachilar ro‘yxati, nonvoyxona va do‘konlarga biriktiruvlar nazorati</p>
+        <p>Dostavkachilar ro‘yxati, barcha nonvoyxona va do‘konlarga biriktiruvlar nazorati</p>
       </div>
-      <div class="drivers-head-actions">
+      <div class="drivers-head-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-outline" id="assign-driver-top-btn" title="Haydovchini nonvoyxona va do‘konlarga biriktirish">
+          <i class="fa-solid fa-link"></i> Haydovchini biriktirish
+        </button>
         ${isSuperAdmin ? `
           <button class="btn btn-primary" id="add-driver-btn">
             <i class="fa-solid fa-user-plus"></i> Yangi haydovchi
@@ -3023,7 +3059,7 @@ async function renderDrivers(content) {
       <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
         <h3>Haydovchilar ro‘yxati (<span id="drivers-count-badge">${totalDrivers}</span>)</h3>
         <div style="min-width: 240px;">
-          <input type="search" id="drivers-search-input" placeholder="Ism, login yoki do'kon bo'yicha..." style="width:100%; padding:6px 12px; font-size:var(--text-xs); border-radius:var(--radius-md); border:1px solid var(--color-border); background:var(--color-surface-2);" />
+          <input type="search" id="drivers-search-input" placeholder="Ism, login, nonvoyxona yoki do'kon..." style="width:100%; padding:6px 12px; font-size:var(--text-xs); border-radius:var(--radius-md); border:1px solid var(--color-border); background:var(--color-surface-2);" />
         </div>
       </div>
 
@@ -3054,9 +3090,9 @@ async function renderDrivers(content) {
     return allDriverDataList.filter(item => {
       const name = (item.driver.full_name || '').toLowerCase();
       const uname = (item.driver.username || '').toLowerCase();
-      const biz = (item.assignedBizName || '').toLowerCase();
-      const stores = item.specificStores.map(s => (s.store?.name || '').toLowerCase()).join(' ');
-      return name.includes(q) || uname.includes(q) || biz.includes(q) || stores.includes(q);
+      const bizNames = Object.values(item.bizGroups).map(g => g.bizName.toLowerCase()).join(' ') + ' ' + (item.assignedBizName || '').toLowerCase();
+      const storeNames = item.assignments.map(a => (a.store?.name || '').toLowerCase()).join(' ');
+      return name.includes(q) || uname.includes(q) || bizNames.includes(q) || storeNames.includes(q);
     });
   }
 
@@ -3106,6 +3142,12 @@ async function renderDrivers(content) {
     };
   }
 
+  // Haydovchini biriktirish tugmasi
+  const assignTopBtn = content.querySelector('#assign-driver-top-btn');
+  if (assignTopBtn) {
+    assignTopBtn.onclick = () => addStoreToDriverModal(null, businesses, allDriverDataList);
+  }
+
   // Yangi haydovchi tugmasi (faqat super_admin)
   const addBtn = content.querySelector('#add-driver-btn');
   if (addBtn && isSuperAdmin) {
@@ -3121,7 +3163,7 @@ function renderDriversRows(driverDataList, isSuperAdmin = false) {
     </td></tr>`;
   }
 
-  return driverDataList.map(({ driver, assignments, hasAllStores, allStoresAssignmentId, specificStores, assignedBizName }) => {
+  return driverDataList.map(({ driver, assignments, bizGroups, isAllBiz, isAllStoresEverywhere, assignedBizName }) => {
     const initials = (driver.full_name || driver.username || 'H')
       .split(' ')
       .filter(Boolean)
@@ -3129,32 +3171,73 @@ function renderDriversRows(driverDataList, isSuperAdmin = false) {
       .map(w => w[0].toUpperCase())
       .join('');
 
-    let storesHtml = '';
-    if (hasAllStores) {
-      storesHtml = `
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span class="driver-all-stores-badge" title="Tanlangan nonvoyxonaning barcha do'konlariga biriktirilgan">
-            <i class="fa-solid fa-layer-group"></i> Barcha do‘konlar
-          </span>
-          ${allStoresAssignmentId ? `
-            <button class="driver-store-tag-remove" data-del-assignment="${allStoresAssignmentId}" title="Ushbu do‘konni haydovchidan olib tashlash" style="color:var(--color-danger); font-size:12px;">
-              <i class="fa-solid fa-trash-can"></i>
-            </button>
-          ` : ''}
-        </div>
+    // Nonvoyxona ustuni
+    let bizHtml = '';
+    const bizGroupList = Object.values(bizGroups || {});
+    if (isAllBiz) {
+      bizHtml = `
+        <span class="driver-all-biz-badge" title="Tizimdagi barcha nonvoyxonalarga biriktirilgan">
+          <i class="fa-solid fa-globe"></i> Barcha nonvoyxonalar
+        </span>
       `;
-    } else if (specificStores.length > 0) {
-      storesHtml = `
-        <div class="driver-stores-cell">
-          ${specificStores.map(a => `
-            <span class="driver-store-tag" title="${escapeHtml(a.store?.address || '')}">
-              <i class="fa-solid fa-store"></i>
-              <span>${escapeHtml(a.store?.name || `Do'kon #${a.store_id}`)}</span>
-              <button type="button" class="driver-store-tag-remove" data-del-assignment="${a.id}" title="Ushbu do‘konni haydovchidan olib tashlash">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
+    } else if (bizGroupList.length > 0) {
+      bizHtml = `
+        <div style="display:flex; flex-wrap:wrap; gap:4px;">
+          ${bizGroupList.map(g => `
+            <span class="badge" style="background:var(--color-surface-2); border:1px solid var(--color-border); font-weight:600; color:var(--color-text);">
+              <i class="fa-solid fa-industry" style="font-size:10px; color:var(--color-primary); margin-right:4px;"></i>${escapeHtml(g.bizName)}
             </span>
           `).join('')}
+        </div>
+      `;
+    } else {
+      bizHtml = `<span style="color:var(--color-text-muted); font-style:italic;">${escapeHtml(assignedBizName || '—')}</span>`;
+    }
+
+    // Do'konlar ustuni
+    let storesHtml = '';
+    if (isAllStoresEverywhere) {
+      storesHtml = `
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="driver-all-everything-badge" title="Barcha nonvoyxonalarning barcha do‘konlariga biriktirilgan">
+            <i class="fa-solid fa-layer-group"></i> Barcha do‘konlar (barcha nonvoyxona)
+          </span>
+        </div>
+      `;
+    } else if (bizGroupList.length > 0) {
+      storesHtml = `
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          ${bizGroupList.map(g => {
+            if (g.hasAllStores) {
+              return `
+                <div style="display:inline-flex; align-items:center; gap:6px;">
+                  <span class="driver-all-stores-badge" title="${escapeHtml(g.bizName)} ning barcha do‘konlariga biriktirilgan">
+                    <i class="fa-solid fa-layer-group"></i> ${escapeHtml(g.bizName)}: Barcha do‘konlar
+                  </span>
+                  ${g.allStoresAssignmentId ? `
+                    <button type="button" class="driver-store-tag-remove" data-del-assignment="${g.allStoresAssignmentId}" title="Ushbu biriktiruvni bekor qilish" style="color:var(--color-danger); font-size:12px;">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                  ` : ''}
+                </div>
+              `;
+            } else if (g.stores.length > 0) {
+              return `
+                <div class="driver-stores-cell" style="display:flex; flex-wrap:wrap; gap:4px;">
+                  ${g.stores.map(a => `
+                    <span class="driver-store-tag" title="${escapeHtml(a.store?.address || '')}">
+                      <i class="fa-solid fa-store"></i>
+                      <span><small style="opacity:0.75; font-size:10px;">${escapeHtml(g.bizName)}:</small> ${escapeHtml(a.store?.name || `Do'kon #${a.store_id}`)}</span>
+                      <button type="button" class="driver-store-tag-remove" data-del-assignment="${a.id}" title="Do‘konni olib tashlash">
+                        <i class="fa-solid fa-xmark"></i>
+                      </button>
+                    </span>
+                  `).join('')}
+                </div>
+              `;
+            }
+            return '';
+          }).filter(Boolean).join('')}
         </div>
       `;
     } else {
@@ -3181,7 +3264,7 @@ function renderDriversRows(driverDataList, isSuperAdmin = false) {
           ${driver.phone ? `<i class="fa-solid fa-phone" style="font-size:11px; margin-right:4px;"></i>${escapeHtml(driver.phone)}` : '<span style="opacity:0.6;">Dostavka xodimi</span>'}
         </td>
         <td>
-          <span style="font-weight:500; color:var(--color-text);">${escapeHtml(assignedBizName)}</span>
+          ${bizHtml}
         </td>
         <td>
           ${storesHtml}
@@ -3191,8 +3274,8 @@ function renderDriversRows(driverDataList, isSuperAdmin = false) {
         </td>
         <td style="text-align:right;">
           <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end; flex-wrap:nowrap;">
-            <button class="btn btn-primary btn-sm" data-add-store="${driver.id}" title="Haydovchiga yangi do‘kon qo‘shish">
-              <i class="fa-solid fa-plus"></i> Do‘kon qo‘shish
+            <button class="btn btn-primary btn-sm" data-add-store="${driver.id}" title="Haydovchiga do‘kon yoki nonvoyxona biriktirish">
+              <i class="fa-solid fa-link"></i> Biriktirish
             </button>
             ${isSuperAdmin ? `
               <button class="icon-btn" data-edit-driver="${driver.id}" title="Haydovchini tahrirlash">
@@ -3215,15 +3298,15 @@ function renderDriversRows(driverDataList, isSuperAdmin = false) {
 }
 
 function bindDriverActions(container, driverDataList, businesses = [], isSuperAdmin = false) {
-  // 1. Alohida do'kon biriktiruvini olib tashlash
+  // 1. Alohida biriktiruvni olib tashlash
   container.querySelectorAll('[data-del-assignment]').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
       const assignmentId = btn.dataset.delAssignment;
-      confirmAction("Ushbu do‘konni haydovchidan olib tashlamoqchimisiz?", async () => {
+      confirmAction("Ushbu biriktiruvni haydovchidan olib tashlamoqchimisiz?", async () => {
         try {
           await API.del('/delivery-assignments/' + assignmentId);
-          toast("Do‘kon biriktiruvi olib tashlandi", 'success');
+          toast("Biriktiruv olib tashlandi", 'success');
           render();
         } catch (err) {
           toast(err.message || 'Xatolik yuz berdi', 'error');
@@ -3240,12 +3323,12 @@ function bindDriverActions(container, driverDataList, businesses = [], isSuperAd
       const driverItem = driverDataList.find(d => Number(d.driver.id) === Number(driverId));
       if (!driverItem || !driverItem.assignments.length) return;
 
-      confirmAction("Ushbu do‘konni haydovchidan olib tashlamoqchimisiz?", async () => {
+      confirmAction("Haydovchining barcha biriktiruvlarini bekor qilmoqchimisiz?", async () => {
         try {
           for (const a of driverItem.assignments) {
             await API.del('/delivery-assignments/' + a.id);
           }
-          toast("Biriktiruv bekor qilindi", 'success');
+          toast("Barcha biriktiruvlar bekor qilindi", 'success');
           render();
         } catch (err) {
           toast(err.message || 'Xatolik yuz berdi', 'error');
@@ -3254,14 +3337,14 @@ function bindDriverActions(container, driverDataList, businesses = [], isSuperAd
     };
   });
 
-  // 3. Haydovchiga yangi do‘kon qo‘shish tugmasi
+  // 3. Haydovchiga do‘kon yoki nonvoyxona biriktirish tugmasi
   container.querySelectorAll('[data-add-store]').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
       const driverId = btn.dataset.addStore;
       const driverItem = driverDataList.find(d => Number(d.driver.id) === Number(driverId));
       if (driverItem) {
-        addStoreToDriverModal(driverItem, businesses);
+        addStoreToDriverModal(driverItem, businesses, driverDataList);
       }
     };
   });
@@ -3311,7 +3394,7 @@ function driverFormModal(defaultBizId, businesses = []) {
   }
   const myBizId = defaultBizId || businesses[0]?.id || '';
 
-  const bizList = businesses.length ? businesses : state.businesses;
+  const bizList = businesses.length ? businesses : (state.businesses || []);
   const currentBizName = bizList.find(b => String(b.id) === String(myBizId))?.name || (myBizId ? `Nonvoyxona #${myBizId}` : '');
 
   openModal("Yangi haydovchi qo‘shish", `
@@ -3345,8 +3428,8 @@ function driverFormModal(defaultBizId, businesses = []) {
           <label>Nonvoyxona *</label>
           ${isSuperAdmin ? `
             <select required id="f-driver-biz" aria-label="Nonvoyxonani tanlang">
-              <option value="">-- Nonvoyxonani tanlang --</option>
-              ${bizList.map(b => `<option value="${b.id}" ${String(b.id) === String(myBizId) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+              <option value="all" selected>✨ Barcha nonvoyxonalar (${bizList.length} ta)</option>
+              ${bizList.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}
             </select>
           ` : `
             <input type="hidden" id="f-driver-biz" value="${myBizId}" />
@@ -3359,12 +3442,15 @@ function driverFormModal(defaultBizId, businesses = []) {
 
         <div class="field span-2" style="margin-top:4px;">
           <label class="checkbox-label" style="display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:600; user-select:none;">
-            <input type="checkbox" id="f-driver-all-stores" style="width:18px; height:18px; accent-color:var(--color-primary);" />
+            <input type="checkbox" id="f-driver-all-stores" checked style="width:18px; height:18px; accent-color:var(--color-primary);" />
             <span>Barcha do‘konlarga biriktirish</span>
           </label>
+          <small style="color:var(--color-text-muted); font-size:11px; display:block; margin-top:2px;" id="driver-all-stores-help">
+            Belgilansa, barcha tegishli do‘konlarga to‘liq biriktiriladi.
+          </small>
         </div>
 
-        <div class="field span-2" id="f-driver-stores-group">
+        <div class="field span-2" id="f-driver-stores-group" style="display:none;">
           <label style="display:flex; justify-content:space-between; align-items:center;">
             <span>Do‘konlar (bir yoki bir nechtasini tanlang)</span>
             <small style="color:var(--color-text-muted); font-size:11px;" id="selected-stores-counter">0 ta tanlandi</small>
@@ -3421,20 +3507,40 @@ function driverFormModal(defaultBizId, businesses = []) {
       pickerWrapper.innerHTML = `<div class="stores-picker-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Do‘konlar yuklanmoqda...</div>`;
 
       try {
-        const list = await API.get(`/stores?business_id=${selectedBizId}&limit=100`);
-        loadedStores = Array.isArray(list) ? list : (list?.data || []);
+        if (selectedBizId === 'all') {
+          // Barcha nonvoyxonalarning do'konlarini yuklash
+          const promises = bizList.map(b => 
+            API.get(`/stores?business_id=${b.id}&limit=100`)
+              .then(res => (Array.isArray(res) ? res : (res?.data || [])).map(s => ({ ...s, _bizName: b.name, _bizId: b.id })))
+              .catch(() => [])
+          );
+          const results = await Promise.all(promises);
+          loadedStores = results.flat().filter(s => s.active !== 0 && s.active !== false);
+        } else {
+          const list = await API.get(`/stores?business_id=${selectedBizId}&limit=100`);
+          const raw = Array.isArray(list) ? list : (list?.data || []);
+          const curBiz = bizList.find(b => String(b.id) === String(selectedBizId));
+          loadedStores = raw.filter(s => s.active !== 0 && s.active !== false).map(s => ({
+            ...s,
+            _bizName: curBiz?.name || `Nonvoyxona #${selectedBizId}`,
+            _bizId: Number(selectedBizId)
+          }));
+        }
 
         if (!loadedStores.length) {
-          pickerWrapper.innerHTML = `<div class="stores-picker-empty">Bu nonvoyxonada hozircha do‘konlar mavjud emas</div>`;
+          pickerWrapper.innerHTML = `<div class="stores-picker-empty">Do‘konlar topilmadi</div>`;
           if (counterEl) counterEl.textContent = '0 ta tanlandi';
           return;
         }
 
         pickerWrapper.innerHTML = loadedStores.map(store => `
           <label class="store-check-item">
-            <input type="checkbox" class="store-check-input" value="${store.id}" />
+            <input type="checkbox" class="store-check-input" value="${store.id}" data-biz-id="${store._bizId}" />
             <div class="store-check-details">
-              <span class="store-check-name">${escapeHtml(store.name)}</span>
+              <span class="store-check-name">
+                ${selectedBizId === 'all' ? `<small style="font-weight:700; color:var(--color-primary); margin-right:4px;">[${escapeHtml(store._bizName)}]</small>` : ''}
+                ${escapeHtml(store.name)}
+              </span>
               ${store.address ? `<span class="store-check-address">${escapeHtml(store.address)}</span>` : ''}
             </div>
           </label>
@@ -3463,20 +3569,19 @@ function driverFormModal(defaultBizId, businesses = []) {
         storesGroup.style.display = 'none';
       } else {
         storesGroup.style.display = '';
-        updateCounter();
+        const currentBiz = bizSelect ? bizSelect.value : myBizId;
+        loadStoresForBusiness(currentBiz);
       }
     };
 
     // Nonvoyxona o'zgarganda
     if (bizSelect) {
       bizSelect.onchange = () => {
-        loadStoresForBusiness(bizSelect.value);
+        if (!allStoresCheckbox.checked) {
+          loadStoresForBusiness(bizSelect.value);
+        }
       };
     }
-
-    // Dastlabki do'konlarni yuklash
-    const initialBizId = bizSelect ? bizSelect.value : myBizId;
-    loadStoresForBusiness(initialBizId);
 
     // Form yuborilishi
     form.onsubmit = async (e) => {
@@ -3485,38 +3590,83 @@ function driverFormModal(defaultBizId, businesses = []) {
       const fullName = backdrop.querySelector('#f-driver-name').value.trim();
       const username = backdrop.querySelector('#f-driver-username').value.trim();
       const password = backdrop.querySelector('#f-driver-password').value;
-      const businessId = bizSelect ? bizSelect.value : myBizId;
+      const selectedBiz = bizSelect ? bizSelect.value : myBizId;
       const isAllStores = allStoresCheckbox.checked;
 
-      if (!fullName || !username || !password || !businessId) {
+      if (!fullName || !username || !password || !selectedBiz) {
         toast("Iltimos, barcha majburiy maydonlarni to‘ldiring", 'warning');
         return;
-      }
-
-      let store_ids = [];
-      if (!isAllStores) {
-        const checkedInputs = pickerWrapper.querySelectorAll('.store-check-input:checked');
-        store_ids = Array.from(checkedInputs).map(cb => Number(cb.value)).filter(id => id > 0);
-        // Takrorlanishlarni bartaraf etish
-        store_ids = [...new Set(store_ids)];
       }
 
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
 
       try {
+        // 1. Foydalanuvchini yaratish
+        const primaryBizId = selectedBiz === 'all' ? (bizList[0]?.id || 1) : Number(selectedBiz);
         const payload = {
           username,
           password,
           full_name: fullName,
           role: 'delivery',
-          business_id: Number(businessId),
-          store_ids
+          business_id: Number(primaryBizId)
         };
 
-        await API.post('/users', payload);
+        const userRes = await API.post('/users', payload);
+        const newUserId = Number(userRes?.id || userRes?.user?.id || userRes?.data?.id);
+
+        if (!newUserId) {
+          throw new Error("Yangi haydovchi yaratildi, lekin ID olinmadi");
+        }
+
+        // 2. Biriktiruvlarni (delivery assignments) shakllantirish
+        if (selectedBiz === 'all') {
+          if (isAllStores) {
+            // Har bir nonvoyxonaning barcha do'konlariga biriktirish (store_id: null)
+            for (const b of bizList) {
+              await API.post('/delivery-assignments', {
+                delivery_user_id: newUserId,
+                business_id: Number(b.id),
+                store_id: null
+              }).catch(() => {});
+            }
+          } else {
+            // Tanlangan aniq do'konlar
+            const checkedInputs = pickerWrapper.querySelectorAll('.store-check-input:checked');
+            for (const cb of checkedInputs) {
+              const sId = Number(cb.value);
+              const bId = Number(cb.dataset.bizId || primaryBizId);
+              await API.post('/delivery-assignments', {
+                delivery_user_id: newUserId,
+                business_id: bId,
+                store_id: sId
+              }).catch(() => {});
+            }
+          }
+        } else {
+          // Bitta tanlangan nonvoyxona
+          const bId = Number(selectedBiz);
+          if (isAllStores) {
+            await API.post('/delivery-assignments', {
+              delivery_user_id: newUserId,
+              business_id: bId,
+              store_id: null
+            }).catch(() => {});
+          } else {
+            const checkedInputs = pickerWrapper.querySelectorAll('.store-check-input:checked');
+            for (const cb of checkedInputs) {
+              const sId = Number(cb.value);
+              await API.post('/delivery-assignments', {
+                delivery_user_id: newUserId,
+                business_id: bId,
+                store_id: sId
+              }).catch(() => {});
+            }
+          }
+        }
+
         backdrop.remove();
-        toast("Yangi haydovchi muvaffaqiyatli qo‘shildi", 'success');
+        toast("Yangi haydovchi muvaffaqiyatli qo‘shildi va biriktirildi", 'success');
         render();
       } catch (err) {
         toast(err.message || "Haydovchini yaratishda xatolik", 'error');
@@ -3647,164 +3797,412 @@ function editDriverModal(driver, businesses = []) {
 }
 
 /**
- * Mavjud haydovchiga yangi do‘kon qo‘shish modali
+ * Haydovchini biriktirish modali
  */
-function addStoreToDriverModal(driverItem, businesses = []) {
+function addStoreToDriverModal(driverItem = null, businesses = [], allDriverDataList = []) {
   const isSuperAdmin = state.user?.role === 'super_admin';
   const isBakeryAdmin = state.user?.role === 'bakery_admin';
 
   if (!isSuperAdmin && !isBakeryAdmin) {
-    toast("Sizda haydovchiga do‘kon biriktirish huquqi yo‘q", 'error');
+    toast("Sizda haydovchini biriktirish huquqi yo‘q", 'error');
     return;
   }
 
-  const driver = driverItem.driver;
-  const bizId = driver.business_id || (isBakeryAdmin ? state.user.business_id : (state.businesses[0]?.id || 1));
-  const bizList = businesses.length ? businesses : state.businesses;
-  const currentBizName = driverItem.assignedBizName || bizList.find(b => String(b.id) === String(bizId))?.name || (bizId ? `Nonvoyxona #${bizId}` : '');
+  const bizList = businesses.length ? businesses : (state.businesses || []);
+  const myBizId = isBakeryAdmin ? state.user.business_id : (bizList[0]?.id || 1);
 
-  // Avvaldan biriktirilgan do'konlar identifikatorlari
-  const alreadyAssignedStoreIds = (driverItem.specificStores || []).map(s => Number(s.store_id));
-  const hasAllStores = Boolean(driverItem.hasAllStores);
+  // Haydovchilar ro'yxatini olish
+  let driversList = [];
+  if (allDriverDataList && allDriverDataList.length > 0) {
+    driversList = allDriverDataList.map(item => item.driver);
+  } else if (driverItem) {
+    driversList = [driverItem.driver];
+  }
 
-  openModal(`Do‘kon qo‘shish — ${escapeHtml(driver.full_name || driver.username)}`, `
-    <form id="add-store-driver-form">
+  const preselectedDriverId = driverItem ? driverItem.driver?.id : '';
+
+  openModal("Haydovchini biriktirish", `
+    <form id="assign-driver-custom-form">
       <div class="form-grid">
+        <!-- 1. Haydovchi tanlash -->
         <div class="field span-2">
-          <label>Haydovchi</label>
-          <div style="background:var(--color-surface-2); border:1px solid var(--color-border); padding:10px 14px; border-radius:var(--radius-md); font-weight:600; display:flex; align-items:center; gap:8px;">
-            <i class="fa-solid fa-id-card" style="color:var(--color-primary);"></i>
-            <span>${escapeHtml(driver.full_name || driver.username)} (@${escapeHtml(driver.username)})</span>
+          <label style="font-weight:600; margin-bottom:6px; display:block;">Haydovchi:</label>
+          <select required id="f-assign-driver-select" style="width:100%;">
+            <option value="">-- Haydovchini tanlang --</option>
+            ${driversList.map(d => `
+              <option value="${d.id}" ${String(d.id) === String(preselectedDriverId) ? 'selected' : ''}>
+                ${escapeHtml(d.full_name || d.username)} (@${escapeHtml(d.username)})
+              </option>
+            `).join('')}
+          </select>
+        </div>
+
+        <!-- 2. Biriktirish hududi -->
+        <div class="field span-2">
+          <label style="font-weight:600; margin-bottom:8px; display:block;">Biriktirish hududi:</label>
+          <div style="display:flex; flex-direction:column; gap:10px; background:var(--color-surface-2); padding:12px 14px; border-radius:var(--radius-md); border:1px solid var(--color-border);">
+            <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:var(--text-sm); font-weight:500;">
+              <input type="radio" name="assign_scope" value="single" checked style="width:18px; height:18px; accent-color:var(--color-primary);" />
+              <span>Bitta nonvoyxona</span>
+            </label>
+            ${isSuperAdmin ? `
+              <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:var(--text-sm); font-weight:500;">
+                <input type="radio" name="assign_scope" value="multiple" style="width:18px; height:18px; accent-color:var(--color-primary);" />
+                <span>Bir nechta nonvoyxona</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:var(--text-sm); font-weight:500;">
+                <input type="radio" name="assign_scope" value="all" style="width:18px; height:18px; accent-color:var(--color-primary);" />
+                <span>Barcha nonvoyxonalar</span>
+              </label>
+            ` : ''}
           </div>
         </div>
 
-        <div class="field span-2">
-          <label>Biriktirilgan nonvoyxona</label>
-          <div style="background:var(--color-surface-2); border:1px solid var(--color-border); padding:10px 14px; border-radius:var(--radius-md); font-weight:600; display:flex; align-items:center; gap:8px;">
-            <i class="fa-solid fa-industry" style="color:var(--color-primary);"></i>
-            <span>${escapeHtml(currentBizName)}</span>
-          </div>
-        </div>
-
-        ${hasAllStores ? `
-          <div class="field span-2">
-            <div class="alert alert-info" style="display:flex; align-items:center; gap:10px; margin-top:6px;">
-              <i class="fa-solid fa-circle-info" style="font-size:18px;"></i>
-              <span>Ushbu haydovchi allaqachon nonvoyxonaning <strong>barcha do‘konlariga</strong> biriktirilgan.</span>
-            </div>
-          </div>
-        ` : `
-          <div class="field span-2">
-            <label>Biriktiriladigan do‘kon *</label>
-            <select id="f-new-store-select" required style="width:100%;">
-              <option value="">Do‘konlar yuklanmoqda...</option>
+        <!-- 3. Nonvoyxona tanlash bloki (Bitta nonvoyxona uchun) -->
+        <div class="field span-2" id="scope-single-block">
+          <label style="font-weight:600; margin-bottom:6px; display:block;">Nonvoyxona:</label>
+          ${isSuperAdmin ? `
+            <select id="f-single-biz-select" style="width:100%;">
+              <option value="">-- Nonvoyxonani tanlang --</option>
+              ${bizList.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}
             </select>
-            <div id="store-select-hint" style="color:var(--color-text-muted); font-size:11px; margin-top:4px;">
-              Faqat ushbu nonvoyxonaga tegishli faol do‘konlar ko‘rsatiladi.
+          ` : `
+            <input type="hidden" id="f-single-biz-select" value="${myBizId}" />
+            <div style="background:var(--color-surface-2); border:1px solid var(--color-border); padding:10px 14px; border-radius:var(--radius-md); font-weight:600; display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-industry" style="color:var(--color-primary);"></i>
+              <span>${escapeHtml(bizList.find(b => String(b.id) === String(myBizId))?.name || `Nonvoyxona #${myBizId}`)}</span>
+            </div>
+          `}
+          <!-- Do'konlarni ixtiyoriy tanlash -->
+          <div id="single-stores-box" style="margin-top:12px; display:none;">
+            <label style="display:flex; justify-content:space-between; align-items:center; font-size:var(--text-xs); margin-bottom:6px;">
+              <span>Do‘konlar <small style="color:var(--color-text-muted); font-weight:400;">(ixtiyoriy — tanlanmasa barchasi biriktiriladi)</small></span>
+              <small style="color:var(--color-text-muted);" id="single-stores-counter">0 ta tanlandi</small>
+            </label>
+            <div id="single-stores-picker" class="stores-picker-box" style="max-height:160px; overflow-y:auto;">
+              <div class="stores-picker-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Do‘konlar yuklanmoqda...</div>
             </div>
           </div>
-        `}
+        </div>
+
+        <!-- 4. Bir nechta nonvoyxona tanlash bloki -->
+        <div class="field span-2" id="scope-multiple-block" style="display:none;">
+          <label style="font-weight:600; margin-bottom:6px; display:block;">Nonvoyxonalar (bir yoki bir nechtasini tanlang):</label>
+          <div style="background:var(--color-surface-2); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
+            ${bizList.map(b => `
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:var(--text-sm);">
+                <input type="checkbox" class="multi-biz-cb" value="${b.id}" style="width:16px; height:16px; accent-color:var(--color-primary);" />
+                <span style="font-weight:500;">${escapeHtml(b.name)}</span>
+              </label>
+            `).join('')}
+          </div>
+          <!-- Bir nechta nonvoyxona do'konlari -->
+          <div id="multi-stores-box" style="margin-top:12px; display:none;">
+            <label style="display:flex; justify-content:space-between; align-items:center; font-size:var(--text-xs); margin-bottom:6px;">
+              <span>Do‘konlar <small style="color:var(--color-text-muted); font-weight:400;">(ixtiyoriy — tanlanmasa barchasi biriktiriladi)</small></span>
+              <small style="color:var(--color-text-muted);" id="multi-stores-counter">0 ta tanlandi</small>
+            </label>
+            <div id="multi-stores-picker" class="stores-picker-box" style="max-height:160px; overflow-y:auto;"></div>
+          </div>
+        </div>
+
+        <!-- 5. Barcha nonvoyxonalar tanlanganidagi axborot -->
+        <div class="field span-2" id="scope-all-block" style="display:none;">
+          <div style="background:rgba(59, 130, 246, 0.08); border:1px solid rgba(59, 130, 246, 0.25); border-radius:var(--radius-md); padding:12px 14px; display:flex; align-items:center; gap:10px;">
+            <i class="fa-solid fa-globe" style="color:#2563eb; font-size:22px; flex-shrink:0;"></i>
+            <div>
+              <strong style="color:var(--color-text); font-size:var(--text-sm);">Barcha nonvoyxonalar (${bizList.length} ta) tanlandi</strong>
+              <div style="font-size:var(--text-xs); color:var(--color-text-muted); margin-top:3px;">
+                ${bizList.map(b => escapeHtml(b.name)).join(' • ')}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. Eslatma -->
+        <div class="field span-2" style="margin-top:2px;">
+          <div style="display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-radius:var(--radius-md); background:rgba(59, 130, 246, 0.08); border:1px solid rgba(59, 130, 246, 0.25); color:var(--color-text);">
+            <i class="fa-solid fa-circle-info" style="color:#2563eb; font-size:16px; margin-top:2px; flex-shrink:0;"></i>
+            <div style="font-size:var(--text-xs); line-height:1.5;">
+              <strong>Eslatma:</strong> Agar aniq do‘kon tanlanmasa, haydovchi tanlangan nonvoyxonaning barcha do‘konlariga biriktiriladi.
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="form-actions" style="margin-top:20px;">
-        <button type="button" class="btn btn-secondary" id="add-store-cancel-btn">Bekor qilish</button>
-        ${!hasAllStores ? `
-          <button type="submit" class="btn btn-primary" id="add-store-submit-btn">
-            <i class="fa-solid fa-check"></i> Biriktirish
-          </button>
-        ` : ''}
+      <div class="form-actions" style="margin-top:20px; display:flex; justify-content:flex-end; gap:10px;">
+        <button type="button" class="btn btn-secondary" id="assign-cancel-btn">Bekor qilish</button>
+        <button type="submit" class="btn btn-primary" id="assign-submit-btn">
+          <i class="fa-solid fa-check"></i> Biriktirish
+        </button>
       </div>
     </form>
   `, (backdrop) => {
-    const form = backdrop.querySelector('#add-store-driver-form');
-    const storeSelect = backdrop.querySelector('#f-new-store-select');
-    const hintEl = backdrop.querySelector('#store-select-hint');
-    const cancelBtn = backdrop.querySelector('#add-store-cancel-btn');
-    const submitBtn = backdrop.querySelector('#add-store-submit-btn');
+    const form = backdrop.querySelector('#assign-driver-custom-form');
+    const driverSelect = backdrop.querySelector('#f-assign-driver-select');
+    const scopeRadios = backdrop.querySelectorAll('input[name="assign_scope"]');
+    const scopeSingleBlock = backdrop.querySelector('#scope-single-block');
+    const scopeMultipleBlock = backdrop.querySelector('#scope-multiple-block');
+    const scopeAllBlock = backdrop.querySelector('#scope-all-block');
+
+    const singleBizSelect = backdrop.querySelector('#f-single-biz-select');
+    const singleStoresBox = backdrop.querySelector('#single-stores-box');
+    const singleStoresPicker = backdrop.querySelector('#single-stores-picker');
+    const singleStoresCounter = backdrop.querySelector('#single-stores-counter');
+
+    const multiBizCbs = backdrop.querySelectorAll('.multi-biz-cb');
+    const multiStoresBox = backdrop.querySelector('#multi-stores-box');
+    const multiStoresPicker = backdrop.querySelector('#multi-stores-picker');
+    const multiStoresCounter = backdrop.querySelector('#multi-stores-counter');
+
+    const cancelBtn = backdrop.querySelector('#assign-cancel-btn');
+    const submitBtn = backdrop.querySelector('#assign-submit-btn');
 
     if (cancelBtn) cancelBtn.onclick = () => backdrop.remove();
 
-    if (hasAllStores) return;
+    // 1. Hudud (radio) o'zgarganda bloklarni ko'rsatish/yashirish
+    scopeRadios.forEach(radio => {
+      radio.onchange = () => {
+        const val = radio.value;
+        if (scopeSingleBlock) scopeSingleBlock.style.display = val === 'single' ? '' : 'none';
+        if (scopeMultipleBlock) scopeMultipleBlock.style.display = val === 'multiple' ? '' : 'none';
+        if (scopeAllBlock) scopeAllBlock.style.display = val === 'all' ? '' : 'none';
 
-    // Do'konlarni faqat ushbu haydovchiga tegishli nonvoyxona bo'yicha yuklash
-    API.get(`/stores?business_id=${bizId}&limit=100`).then(res => {
-      const allStores = Array.isArray(res) ? res : (res?.data || []);
-      const activeStores = allStores.filter(s => s.active !== 0 && s.active !== false);
-
-      if (!activeStores.length) {
-        storeSelect.innerHTML = `<option value="">Bu nonvoyxonada faol do‘konlar topilmadi</option>`;
-        storeSelect.disabled = true;
-        if (submitBtn) submitBtn.disabled = true;
-        return;
-      }
-
-      const unassignedStores = activeStores.filter(s => !alreadyAssignedStoreIds.includes(Number(s.id)));
-
-      if (!unassignedStores.length) {
-        storeSelect.innerHTML = `<option value="">Barcha faol do‘konlar allaqachon biriktirilgan</option>`;
-        storeSelect.disabled = true;
-        if (submitBtn) submitBtn.disabled = true;
-        if (hintEl) hintEl.textContent = "Ushbu nonvoyxonaning barcha do‘konlari ushbu haydovchiga biriktirib bo‘lingan.";
-        return;
-      }
-
-      // Do'konlar ro'yxatini shakllantirish: avval biriktirilmaganlar, keyin disabled qilib biriktirilganlar
-      let optionsHtml = `<option value="">-- Yangi do‘konni tanlang --</option>`;
-      activeStores.forEach(s => {
-        const isAssigned = alreadyAssignedStoreIds.includes(Number(s.id));
-        const addrText = s.address ? ` (${escapeHtml(s.address)})` : '';
-        if (isAssigned) {
-          optionsHtml += `<option value="${s.id}" disabled style="color:var(--color-text-muted);">${escapeHtml(s.name)}${addrText} — allaqachon biriktirilgan</option>`;
-        } else {
-          optionsHtml += `<option value="${s.id}">${escapeHtml(s.name)}${addrText}</option>`;
+        if (val === 'single') {
+          const currentSingleBiz = singleBizSelect ? singleBizSelect.value : myBizId;
+          if (currentSingleBiz) loadSingleBizStores(currentSingleBiz);
+        } else if (val === 'multiple') {
+          loadMultiBizStores();
         }
-      });
-
-      storeSelect.innerHTML = optionsHtml;
-      storeSelect.disabled = false;
-    }).catch(err => {
-      storeSelect.innerHTML = `<option value="">Do‘konlarni yuklab bo‘lmadi: ${escapeHtml(err.message || 'Xatolik')}</option>`;
-      storeSelect.disabled = true;
-      if (submitBtn) submitBtn.disabled = true;
+      };
     });
 
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      const selectedStoreId = storeSelect ? storeSelect.value : null;
-
-      if (!selectedStoreId) {
-        toast("Iltimos, biriktiriladigan do‘konni tanlang", 'warning');
+    // 2. Bitta nonvoyxona do'konlarini yuklash
+    async function loadSingleBizStores(bizId) {
+      if (!bizId) {
+        if (singleStoresBox) singleStoresBox.style.display = 'none';
         return;
       }
-
-      // Takroran biriktirishni oldini olish
-      if (alreadyAssignedStoreIds.includes(Number(selectedStoreId))) {
-        toast("Bu do‘kon allaqachon ushbu haydovchiga biriktirilgan", 'warning');
-        return;
-      }
-
-      if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Biriktirilmoqda...';
+      if (singleStoresBox) singleStoresBox.style.display = '';
+      if (singleStoresPicker) {
+        singleStoresPicker.innerHTML = `<div class="stores-picker-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Do‘konlar yuklanmoqda...</div>`;
       }
 
       try {
-        const payload = {
-          delivery_user_id: Number(driver.id),
-          business_id: Number(bizId),
-          store_id: Number(selectedStoreId)
-        };
+        const list = await API.get(`/stores?business_id=${bizId}&limit=100`);
+        const stores = (Array.isArray(list) ? list : (list?.data || [])).filter(s => s.active !== 0 && s.active !== false);
 
-        await API.post('/delivery-assignments', payload);
+        if (!stores.length) {
+          if (singleStoresPicker) {
+            singleStoresPicker.innerHTML = `<div class="stores-picker-empty" style="font-size:11px;">Do‘konlar topilmadi (barcha do‘konlar rejimida biriktiriladi)</div>`;
+          }
+          if (singleStoresCounter) singleStoresCounter.textContent = '0 ta tanlandi';
+          return;
+        }
+
+        if (singleStoresPicker) {
+          singleStoresPicker.innerHTML = stores.map(store => `
+            <label class="store-check-item">
+              <input type="checkbox" class="single-store-item-cb" value="${store.id}" />
+              <div class="store-check-details">
+                <span class="store-check-name">${escapeHtml(store.name)}</span>
+                ${store.address ? `<span class="store-check-address">${escapeHtml(store.address)}</span>` : ''}
+              </div>
+            </label>
+          `).join('');
+
+          singleStoresPicker.querySelectorAll('.single-store-item-cb').forEach(cb => {
+            cb.onchange = updateSingleCounter;
+          });
+          updateSingleCounter();
+        }
+      } catch (err) {
+        if (singleStoresPicker) {
+          singleStoresPicker.innerHTML = `<div class="stores-picker-empty" style="color:var(--color-danger); font-size:11px;">Do‘konlarni yuklab bo‘lmadi</div>`;
+        }
+      }
+    }
+
+    function updateSingleCounter() {
+      if (!singleStoresCounter || !singleStoresPicker) return;
+      const cnt = singleStoresPicker.querySelectorAll('.single-store-item-cb:checked').length;
+      singleStoresCounter.textContent = `${cnt} ta tanlandi`;
+    }
+
+    if (singleBizSelect) {
+      singleBizSelect.onchange = () => {
+        loadSingleBizStores(singleBizSelect.value);
+      };
+      // Agar dastlab nonvoyxona tanlangan bo'lsa
+      if (singleBizSelect.value) {
+        loadSingleBizStores(singleBizSelect.value);
+      }
+    }
+
+    // 3. Bir nechta nonvoyxona do'konlarini yuklash
+    async function loadMultiBizStores() {
+      const checkedBizIds = Array.from(multiBizCbs).filter(cb => cb.checked).map(cb => cb.value);
+      if (!checkedBizIds.length) {
+        if (multiStoresBox) multiStoresBox.style.display = 'none';
+        return;
+      }
+      if (multiStoresBox) multiStoresBox.style.display = '';
+      if (multiStoresPicker) {
+        multiStoresPicker.innerHTML = `<div class="stores-picker-empty"><i class="fa-solid fa-circle-notch fa-spin"></i> Do‘konlar yuklanmoqda...</div>`;
+      }
+
+      try {
+        const promises = checkedBizIds.map(bId => 
+          API.get(`/stores?business_id=${bId}&limit=100`)
+            .then(res => {
+              const bName = bizList.find(b => String(b.id) === String(bId))?.name || `Nonvoyxona #${bId}`;
+              const items = (Array.isArray(res) ? res : (res?.data || [])).filter(s => s.active !== 0 && s.active !== false);
+              return items.map(s => ({ ...s, _bizId: bId, _bizName: bName }));
+            })
+            .catch(() => [])
+        );
+
+        const results = await Promise.all(promises);
+        const allStores = results.flat();
+
+        if (!allStores.length) {
+          if (multiStoresPicker) {
+            multiStoresPicker.innerHTML = `<div class="stores-picker-empty" style="font-size:11px;">Do‘konlar topilmadi (barcha do‘konlar rejimida biriktiriladi)</div>`;
+          }
+          if (multiStoresCounter) multiStoresCounter.textContent = '0 ta tanlandi';
+          return;
+        }
+
+        if (multiStoresPicker) {
+          multiStoresPicker.innerHTML = allStores.map(store => `
+            <label class="store-check-item">
+              <input type="checkbox" class="multi-store-item-cb" value="${store.id}" data-biz-id="${store._bizId}" />
+              <div class="store-check-details">
+                <span class="store-check-name">
+                  <small style="font-weight:700; color:var(--color-primary); margin-right:4px;">[${escapeHtml(store._bizName)}]</small>
+                  ${escapeHtml(store.name)}
+                </span>
+                ${store.address ? `<span class="store-check-address">${escapeHtml(store.address)}</span>` : ''}
+              </div>
+            </label>
+          `).join('');
+
+          multiStoresPicker.querySelectorAll('.multi-store-item-cb').forEach(cb => {
+            cb.onchange = updateMultiCounter;
+          });
+          updateMultiCounter();
+        }
+      } catch (err) {
+        if (multiStoresPicker) {
+          multiStoresPicker.innerHTML = `<div class="stores-picker-empty" style="color:var(--color-danger); font-size:11px;">Do‘konlarni yuklab bo‘lmadi</div>`;
+        }
+      }
+    }
+
+    function updateMultiCounter() {
+      if (!multiStoresCounter || !multiStoresPicker) return;
+      const cnt = multiStoresPicker.querySelectorAll('.multi-store-item-cb:checked').length;
+      multiStoresCounter.textContent = `${cnt} ta tanlandi`;
+    }
+
+    multiBizCbs.forEach(cb => {
+      cb.onchange = loadMultiBizStores;
+    });
+
+    // 4. Form submit (Biriktirish jarayoni)
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+
+      const selectedDriverId = driverSelect ? driverSelect.value : '';
+      if (!selectedDriverId) {
+        toast("Iltimos, haydovchini tanlang", 'warning');
+        return;
+      }
+
+      const activeScope = Array.from(scopeRadios).find(r => r.checked)?.value || 'single';
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Biriktirilmoqda...';
+
+      try {
+        if (activeScope === 'single') {
+          // Bitta nonvoyxona
+          const selectedBizId = singleBizSelect ? singleBizSelect.value : myBizId;
+          if (!selectedBizId) {
+            toast("Iltimos, nonvoyxonani tanlang", 'warning');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
+            return;
+          }
+
+          const checkedStoreInputs = singleStoresPicker ? singleStoresPicker.querySelectorAll('.single-store-item-cb:checked') : [];
+          
+          if (checkedStoreInputs.length === 0) {
+            // Aniq do'kon tanlanmagan -> Barcha do'konlarga biriktirish (store_id: null)
+            await API.post('/delivery-assignments', {
+              delivery_user_id: Number(selectedDriverId),
+              business_id: Number(selectedBizId),
+              store_id: null
+            }).catch(() => {});
+          } else {
+            // Aniq tanlangan do'konlarga biriktirish
+            for (const cb of checkedStoreInputs) {
+              await API.post('/delivery-assignments', {
+                delivery_user_id: Number(selectedDriverId),
+                business_id: Number(selectedBizId),
+                store_id: Number(cb.value)
+              }).catch(() => {});
+            }
+          }
+        } else if (activeScope === 'multiple') {
+          // Bir nechta nonvoyxona
+          const checkedBizInputs = Array.from(multiBizCbs).filter(cb => cb.checked);
+          if (!checkedBizInputs.length) {
+            toast("Iltimos, kamida bitta nonvoyxonani belgilang", 'warning');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
+            return;
+          }
+
+          const checkedStoreInputs = multiStoresPicker ? multiStoresPicker.querySelectorAll('.multi-store-item-cb:checked') : [];
+          
+          if (checkedStoreInputs.length === 0) {
+            // Har bir belgilangan nonvoyxonaning barcha do'konlariga biriktirish (store_id: null)
+            for (const bCb of checkedBizInputs) {
+              await API.post('/delivery-assignments', {
+                delivery_user_id: Number(selectedDriverId),
+                business_id: Number(bCb.value),
+                store_id: null
+              }).catch(() => {});
+            }
+          } else {
+            // Tanlangan do'konlarga biriktirish
+            for (const sCb of checkedStoreInputs) {
+              await API.post('/delivery-assignments', {
+                delivery_user_id: Number(selectedDriverId),
+                business_id: Number(sCb.dataset.bizId),
+                store_id: Number(sCb.value)
+              }).catch(() => {});
+            }
+          }
+        } else if (activeScope === 'all') {
+          // Barcha nonvoyxonalar
+          for (const b of bizList) {
+            await API.post('/delivery-assignments', {
+              delivery_user_id: Number(selectedDriverId),
+              business_id: Number(b.id),
+              store_id: null
+            }).catch(() => {});
+          }
+        }
+
         backdrop.remove();
-        toast("Do‘kon muvaffaqiyatli biriktirildi", 'success');
+        toast("Haydovchi muvaffaqiyatli biriktirildi", 'success');
         render();
       } catch (err) {
-        toast(err.message || "Do‘konni biriktirishda xatolik yuz berdi", 'error');
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
-        }
+        toast(err.message || "Biriktirishda xatolik yuz berdi", 'error');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
       }
     };
   });
