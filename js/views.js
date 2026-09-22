@@ -49,6 +49,7 @@ function extractListData(res, defaultPage = 1, defaultLimit = 10) {
   if (Array.isArray(res)) {
     return {
       items: res,
+      data: res,
       pagination: {
         page: defaultPage,
         limit: defaultLimit,
@@ -68,6 +69,7 @@ function extractListData(res, defaultPage = 1, defaultLimit = 10) {
 
   return {
     items,
+    data: items,
     pagination: { page, limit, total, totalPages }
   };
 }
@@ -2894,49 +2896,87 @@ async function renderDrivers(content) {
 
   // Parallel yuklash
   const [assignmentsRes, usersRes, businessesRes] = await Promise.all([
-    API.get('/delivery-assignments' + bizParam),
-    API.get('/users?limit=100'),
-    state.businesses?.length ? state.businesses : API.get('/businesses?limit=100')
+    API.get('/delivery-assignments' + bizParam).catch(() => []),
+    API.get('/users?limit=100').catch(() => []),
+    (state.businesses?.length ? state.businesses : API.get('/businesses?limit=100')).catch?.(() => []) || state.businesses || []
   ]);
 
-  const assignments = extractListData(assignmentsRes, 1, 100).data;
-  const allUsers = extractListData(usersRes, 1, 100).data;
-  const businesses = extractListData(businessesRes, 1, 100).data;
+  // Kelgan API javobidan data ichidagi ma'lumotlarni xavfsiz ajratib olish (filter/map uchun tayyorlash)
+  const extractDataArray = (res) => {
+    if (!res) return [];
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res.data)) return res.data;
+    if (Array.isArray(res.items)) return res.items;
+    if (Array.isArray(res.users)) return res.users;
+    if (Array.isArray(res.assignments)) return res.assignments;
+    if (Array.isArray(res.businesses)) return res.businesses;
+    return [];
+  };
+
+  const assignments = extractDataArray(assignmentsRes);
+  const allUsers = extractDataArray(usersRes);
+  const businesses = extractDataArray(businessesRes);
 
   const bizName = (id) => businesses.find(b => String(b.id) === String(id))?.name || (id ? `Nonvoyxona #${id}` : '—');
 
-  // Haydovchilarni filtrlash
-  let drivers = allUsers.filter(u => u.role === 'delivery' || u.role === 'dostavkachi');
-  if (bizId) {
-    drivers = drivers.filter(u => String(u.business_id) === String(bizId));
-  }
+  // 1. Haydovchilarni filtrlash (role: delivery, dostavkachi, driver)
+  let drivers = allUsers.filter(u => {
+    const role = (u.role || '').toLowerCase();
+    const isDriverRole = role === 'delivery' || role === 'dostavkachi' || role === 'driver';
+    if (!isDriverRole) return false;
+    if (bizId) {
+      const matchesBiz = String(u.business_id) === String(bizId);
+      const hasAssignmentInBiz = assignments.some(a => 
+        Number(a.delivery_user_id || a.delivery_user?.id) === Number(u.id) && 
+        String(a.business_id) === String(bizId)
+      );
+      return matchesBiz || hasAssignmentInBiz;
+    }
+    return true;
+  });
 
-  // Biriktiruvlarda bor, lekin users ro'yxatida bo'lmasligi mumkin bo'lgan haydovchilarni qo'shish
+  // 2. Biriktiruvlarda (assignments) bor, lekin users ro'yxatida bo'lmasligi mumkin bo'lgan haydovchilarni qo'shish
   assignments.forEach(a => {
-    if (a.delivery_user && !drivers.some(d => Number(d.id) === Number(a.delivery_user_id))) {
-      drivers.push({
-        id: a.delivery_user.id,
-        username: a.delivery_user.username,
-        full_name: a.delivery_user.full_name,
-        role: a.delivery_user.role || 'delivery',
-        business_id: a.business_id,
-        active: 1
-      });
+    const deliveryUser = a.delivery_user;
+    const deliveryUserId = Number(a.delivery_user_id || deliveryUser?.id);
+    if (!deliveryUserId) return;
+
+    if (!drivers.some(d => Number(d.id) === deliveryUserId)) {
+      if (!bizId || String(a.business_id) === String(bizId)) {
+        drivers.push({
+          id: deliveryUserId,
+          username: deliveryUser?.username || `driver_${deliveryUserId}`,
+          full_name: deliveryUser?.full_name || deliveryUser?.username || `Haydovchi #${deliveryUserId}`,
+          role: deliveryUser?.role || 'delivery',
+          business_id: a.business_id || deliveryUser?.business_id,
+          phone: deliveryUser?.phone || '',
+          active: deliveryUser?.active !== undefined ? deliveryUser.active : 1
+        });
+      }
     }
   });
 
-  // Haydovchilar bo'yicha guruhlash
+  // 3. Haydovchilar takrorlanmasligi uchun unikal qilib filtrlash
+  const uniqueDriversMap = new Map();
+  drivers.forEach(d => {
+    if (d && d.id && !uniqueDriversMap.has(Number(d.id))) {
+      uniqueDriversMap.set(Number(d.id), d);
+    }
+  });
+  drivers = Array.from(uniqueDriversMap.values());
+
+  // 4. Haydovchilar bo'yicha ma'lumotlarni map qilish (biriktiruvlar, do'konlar va nonvoyxona bilan boyitish)
   const allDriverDataList = drivers.map(driver => {
-    const driverAssignments = assignments.filter(a => Number(a.delivery_user_id) === Number(driver.id));
-    const hasAllStores = driverAssignments.some(a => a.store_id === null || !a.store);
-    const specificStores = driverAssignments.filter(a => a.store_id !== null && a.store);
+    const driverAssignments = assignments.filter(a => Number(a.delivery_user_id || a.delivery_user?.id) === Number(driver.id));
+    const hasAllStores = driverAssignments.some(a => a.store_id === null || a.store_id === undefined || a.all_stores === true || a.all_stores === 1 || !a.store);
+    const specificStores = driverAssignments.filter(a => a.store_id !== null && a.store_id !== undefined && !a.all_stores);
     const assignedBizName = driver.business_name || bizName(driver.business_id) || driverAssignments[0]?.business?.name || '—';
 
     return {
       driver,
       assignments: driverAssignments,
       hasAllStores,
-      allStoresAssignmentId: driverAssignments.find(a => a.store_id === null || !a.store)?.id,
+      allStoresAssignmentId: driverAssignments.find(a => a.store_id === null || a.store_id === undefined || a.all_stores || !a.store)?.id,
       specificStores,
       assignedBizName
     };

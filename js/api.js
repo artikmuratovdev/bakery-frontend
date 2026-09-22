@@ -1,4 +1,4 @@
-const API_BASE ="https://bakery-system-q9nt.onrender.com/api";
+const API_BASE ="https://bakery-system-1-52h6.onrender.com/api";
 // const API_BASE ="http://localhost:5000/api";
 
 function parseBackendError(data, res, rawText) {
