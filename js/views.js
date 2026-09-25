@@ -33,7 +33,15 @@ function confirmAction(msg, onYes) {
     </div>
   `, (m) => {
     m.querySelector('#confirm-no').onclick = () => m.remove();
-    m.querySelector('#confirm-yes').onclick = async () => { m.remove(); await onYes(); };
+    m.querySelector('#confirm-yes').onclick = async () => {
+      const yesBtn = m.querySelector('#confirm-yes');
+      const noBtn = m.querySelector('#confirm-no');
+      if (noBtn) noBtn.disabled = true;
+      await withButtonLoading(yesBtn, async () => {
+        await onYes();
+      }, `<i class="fa-solid fa-spinner fa-spin"></i> Bajarilmoqda...`);
+      m.remove();
+    };
   });
 }
 
@@ -567,11 +575,7 @@ function bizFormModal(biz) {
         body.password = passwordVal;
       }
 
-      const originalBtnHtml = submitBtn.innerHTML;
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
-
-      try {
+      await withButtonLoading(submitBtn, async () => {
         if (biz) {
           await API.put('/businesses/' + biz.id, body);
           toast('Nonvoyxona yangilandi', 'success');
@@ -588,12 +592,7 @@ function bizFormModal(biz) {
         state.businesses = Array.isArray(bRes) ? bRes : (bRes?.data || []);
         renderBusinessSwitcher();
         render();
-      } catch (err) {
-        if (body.password) body.password = '';
-        toast(err.message, 'error');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = originalBtnHtml;
-      }
+      }, `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`);
     };
   });
 }
@@ -697,6 +696,7 @@ function productFormModal(product, defaultBizId) {
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#product-form').onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = m.querySelector('button[type="submit"]');
       const body = {
         name: document.getElementById('f-name').value.trim(),
         price: Number(document.getElementById('f-price').value)
@@ -706,13 +706,14 @@ function productFormModal(product, defaultBizId) {
         if (activeSel) body.active = Number(activeSel.value);
       }
       if (needsBizSelect && !product) body.business_id = document.getElementById('f-biz').value;
-      try {
+
+      await withButtonLoading(submitBtn, async () => {
         if (product) await API.put('/products/' + product.id, body);
         else await API.post('/products', body);
         toast(product ? 'Yangilandi' : "Qo'shildi", 'success');
         m.remove();
         render();
-      } catch (err) { toast(err.message, 'error'); }
+      });
     };
   });
 }
@@ -908,11 +909,7 @@ function storeFormModal(store, defaultBizId) {
         body.password = passwordVal;
       }
 
-      const originalBtnHtml = submitBtn.innerHTML;
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
-
-      try {
+      await withButtonLoading(submitBtn, async () => {
         if (store) {
           await API.put('/stores/' + store.id, body);
           toast("Do'kon yangilandi", 'success');
@@ -926,12 +923,7 @@ function storeFormModal(store, defaultBizId) {
 
         m.remove();
         render();
-      } catch (err) {
-        if (body.password) body.password = '';
-        toast(err.message, 'error');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = originalBtnHtml;
-      }
+      });
     };
   });
 }
@@ -1134,18 +1126,20 @@ function productionFormModal(defaultBizId) {
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#prod-form').onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = m.querySelector('button[type="submit"]');
       const body = {
         product_id: m.querySelector('#f-product').value,
         date: m.querySelector('#f-date').value,
         quantity: Number(m.querySelector('#f-qty').value)
       };
       if (needsBizSelect) body.business_id = m.querySelector('#f-biz').value;
-      try {
+
+      await withButtonLoading(submitBtn, async () => {
         await API.post('/production', body);
         toast("Ishlab chiqarish yozuvi qo'shildi", 'success');
         m.remove();
         render();
-      } catch (err) { toast(err.message, 'error'); }
+      });
     };
   });
 }
@@ -1365,6 +1359,7 @@ function distributionFormModal(defaultBizId) {
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#dist-form').onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = m.querySelector('button[type="submit"]');
       const type = m.querySelector('#f-pay-type').value;
       const cash = type === 'credit' ? 0 : Number(m.querySelector('#f-cash').value || 0);
       const credit = type === 'cash' ? 0 : Number(m.querySelector('#f-credit').value || 0);
@@ -1377,12 +1372,13 @@ function distributionFormModal(defaultBizId) {
         credit_amount: credit
       };
       if (needsBizSelect) body.business_id = m.querySelector('#f-biz').value;
-      try {
+
+      await withButtonLoading(submitBtn, async () => {
         await API.post('/distribution', body);
         toast("Taqsimlash yozuvi qo'shildi", 'success');
         m.remove();
         render();
-      } catch (err) { toast(err.message, 'error'); }
+      });
     };
   });
 }
@@ -1568,6 +1564,7 @@ function paymentFormModal(store, currentDebt) {
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#pay-form').onsubmit = async (e) => {
       e.preventDefault();
+      const submitBtn = m.querySelector('button[type="submit"]');
       const body = {
         store_id: store.id,
         date: m.querySelector('#f-date').value,
@@ -1575,12 +1572,13 @@ function paymentFormModal(store, currentDebt) {
         note: m.querySelector('#f-note').value.trim(),
         business_id: store.business_id
       };
-      try {
+
+      await withButtonLoading(submitBtn, async () => {
         await API.post('/payments', body);
         toast("To'lov qabul qilindi", 'success');
         m.remove();
         render();
-      } catch (err) { toast(err.message, 'error'); }
+      });
     };
   });
 }
@@ -1952,21 +1950,14 @@ async function renderOrders(content) {
           btn.onclick = async (e) => {
             e.stopPropagation();
             const orderId = btn.dataset.approveOrder;
-            btn.disabled = true;
-            const origHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
-            try {
+            await withButtonLoading(btn, async () => {
               await API.patch(`/orders/${orderId}/status`, {
                 status: 'approved'
               });
               toast(`Zakaz #${orderId} muvaffaqiyatli tasdiqlandi`, 'success');
               await loadData();
-            } catch (err) {
-              toast(err.message || "Zakazni tasdiqlashda xatolik yuz berdi", 'error');
-              btn.disabled = false;
-              btn.innerHTML = origHtml;
-            }
+            }, '<i class="fa-solid fa-spinner fa-spin"></i>');
           };
         });
       }
@@ -2148,10 +2139,7 @@ async function orderCreateModal(onSuccess) {
 
       const note = m.querySelector('#f-order-note').value.trim();
 
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Yuborilmoqda...`;
-
-      try {
+      await withButtonLoading(submitBtn, async () => {
         await API.post('/orders', {
           items,
           note: note || undefined
@@ -2160,12 +2148,7 @@ async function orderCreateModal(onSuccess) {
         toast("Zakaz muvaffaqiyatli yuborildi!", 'success');
         m.remove();
         if (onSuccess) onSuccess();
-      } catch (err) {
-        errorEl.textContent = err.message || "Zakaz yuborishda xatolik yuz berdi";
-        errorEl.classList.remove('hidden');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = `<i class="fa-solid fa-paper-plane"></i> Zakazni yuborish`;
-      }
+      }, `<i class="fa-solid fa-spinner fa-spin"></i> Yuborilmoqda...`);
     };
   });
 }
@@ -2275,18 +2258,12 @@ function orderDetailModal(order, onUpdate) {
       const quickApproveBtn = m.querySelector('#modal-quick-approve-btn');
       if (quickApproveBtn) {
         quickApproveBtn.onclick = async () => {
-          quickApproveBtn.disabled = true;
-          quickApproveBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Tasdiqlanmoqda...`;
-          try {
+          await withButtonLoading(quickApproveBtn, async () => {
             await API.patch(`/orders/${order.id}/status`, { status: 'approved' });
             toast(`Zakaz #${order.id} muvaffaqiyatli tasdiqlandi`, 'success');
             m.remove();
             if (onUpdate) onUpdate();
-          } catch (err) {
-            toast(err.message || "Zakazni tasdiqlashda xatolik", 'error');
-            quickApproveBtn.disabled = false;
-            quickApproveBtn.innerHTML = `<i class="fa-solid fa-check"></i> Zakazni tasdiqlash`;
-          }
+          }, `<i class="fa-solid fa-spinner fa-spin"></i> Tasdiqlanmoqda...`);
         };
       }
 
@@ -2295,21 +2272,15 @@ function orderDetailModal(order, onUpdate) {
 
       saveBtn.onclick = async () => {
         const newStatus = statusSelect.value;
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
 
-        try {
+        await withButtonLoading(saveBtn, async () => {
           await API.patch(`/orders/${order.id}/status`, {
             status: newStatus
           });
           toast("Zakaz statusi muvaffaqiyatli o'zgartirildi", 'success');
           m.remove();
           if (onUpdate) onUpdate();
-        } catch (err) {
-          toast(err.message || "Statusni o'zgartirishda xatolik", 'error');
-          saveBtn.disabled = false;
-          saveBtn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> Statusni saqlash`;
-        }
+        }, `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`);
       };
     }
   });
@@ -2508,6 +2479,15 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         </div>
       </div>
 
+      <!-- Ro'yxatda bo'lmagan do'konga yetkazish tugmasi -->
+      <div style="margin-bottom:20px;">
+        <button id="open-ext-delivery-btn" class="ext-delivery-open-btn">
+          <i class="fa-solid fa-map-location-dot"></i>
+          Ro'yxatda bo'lmagan do'konga yetkazish
+          <span class="ext-delivery-new-badge">Yangi</span>
+        </button>
+      </div>
+
       <!-- Orders List Container -->
       <div id="delivery-orders-list">
         ${filteredOrders.length ? filteredOrders.map(order => renderDeliveryOrderCard(order)).join('') : `
@@ -2525,6 +2505,9 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         `}
       </div>
       ${renderPaginationHtml(currentPagination, 'deliv-pg')}
+
+      <!-- Bugungi tashqi yetkazishlar bo'limi -->
+      <div id="ext-deliveries-section" style="margin-top:28px;"></div>
     `;
 
     bindPaginationEvents(content, currentPagination, (newPage) => {
@@ -2536,9 +2519,10 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     const refreshBtn = content.querySelector('#delivery-manual-refresh-btn');
     if (refreshBtn) {
       refreshBtn.onclick = async () => {
-        refreshBtn.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i>';
-        await loadData();
-        toast("Zakazlar yangilandi", 'info');
+        await withButtonLoading(refreshBtn, async () => {
+          await loadData();
+          toast("Zakazlar yangilandi", 'info');
+        }, '<i class="fa-solid fa-rotate fa-spin"></i>');
       };
     }
 
@@ -2691,13 +2675,11 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
           return;
         }
 
-        submitBtn.disabled = true;
-        qtyInput.disabled = true;
-        cashInput.disabled = true;
-        creditInput.disabled = true;
-        submitBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`;
+        await withButtonLoading(submitBtn, async () => {
+          qtyInput.disabled = true;
+          cashInput.disabled = true;
+          creditInput.disabled = true;
 
-        try {
           await API.post(`/deliveries/orders/${orderId}/items/${itemId}`, {
             quantity: qty,
             cash_amount: cash,
@@ -2707,16 +2689,82 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
           toast("Delivery muvaffaqiyatli saqlandi", 'success');
           // Ma'lumotlarni qayta yuklab UI ni to'liq yangilaymiz
           await loadData(true);
-        } catch (err) {
-          toast(err.message || "Deliveryni saqlashda xatolik yuz berdi", 'error');
-          submitBtn.disabled = false;
-          qtyInput.disabled = false;
-          cashInput.disabled = false;
-          creditInput.disabled = false;
-          submitBtn.innerHTML = `<i class="fa-solid fa-check"></i> Tasdiqlash`;
-        }
+        }, `<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...`);
+
+        // Re-enable inputs after (in case of error, withButtonLoading will restore button but not inputs)
+        qtyInput.disabled = false;
+        cashInput.disabled = false;
+        creditInput.disabled = false;
       };
     });
+
+    // "Ro'yxatda bo'lmagan do'kon" tugmasi handler
+    const extDeliveryBtn = content.querySelector('#open-ext-delivery-btn');
+    if (extDeliveryBtn) {
+      extDeliveryBtn.onclick = () => externalDeliveryModal(loadExtDeliveriesSection);
+    }
+
+    // Bugungi tashqi yetkazishlarni yuklash
+    loadExtDeliveriesSection();
+  }
+
+  // Bugungi tashqi yetkazishlar bo'limini render qilish
+  async function loadExtDeliveriesSection() {
+    const section = content.querySelector('#ext-deliveries-section');
+    if (!section) return;
+    try {
+      const today = todayStr();
+      const res = await API.get(`/deliveries/external?date=${today}&limit=50`, { bypassCache: true });
+      const list = Array.isArray(res) ? res : (res?.data || res?.deliveries || []);
+
+      if (!list.length) {
+        section.innerHTML = '';
+        return;
+      }
+
+      section.innerHTML = `
+        <div class="card ext-deliveries-today-card">
+          <div class="card-header" style="display:flex; align-items:center; gap:10px;">
+            <i class="fa-solid fa-map-location-dot" style="color:var(--color-green); font-size:16px;"></i>
+            <h3 style="margin:0;">Bugungi ro'yxatdan tashqari yetkazishlar</h3>
+            <span class="badge badge-green" style="margin-left:auto;">${list.length} ta</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Do'kon / Mijoz</th>
+                  <th>Manzil</th>
+                  <th>Mahsulot</th>
+                  <th class="text-right">Miqdor</th>
+                  <th>Vaqt</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${list.map(d => {
+                  const productName = d.product_name || d.product?.name || ('Mahsulot #' + (d.product_id || ''));
+                  const qty = fmtNum(d.quantity || 0);
+                  const time = formatDateTime(d.created_at || d.createdAt || d.delivered_at);
+                  return `
+                    <tr>
+                      <td><strong>${escapeHtml(d.store_name || d.client_name || '—')}</strong></td>
+                      <td class="muted">${escapeHtml(d.address || d.location || '—')}</td>
+                      <td>${escapeHtml(productName)}</td>
+                      <td class="text-right num"><strong>${qty} dona</strong></td>
+                      <td class="muted" style="white-space:nowrap;">${time}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      // Endpoint mavjud bo'lmasa yoki xatolik — bo'limni yashirish
+      const s2 = content.querySelector('#ext-deliveries-section');
+      if (s2) s2.innerHTML = '';
+    }
   }
 
   function renderDeliveryOrderCard(order) {
@@ -2877,7 +2925,230 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
   }, 25000);
 }
 
-/* ===================== SECTION 22: HAYDOVCHILAR BOSHQARUVI ===================== */
+/* ===================== RO'YXATDAN TASHQARI YETKAZISH MODAL ===================== */
+async function externalDeliveryModal(onSuccess) {
+  // Mahsulotlarni yuklash
+  let products = [];
+  try {
+    const bizId = state.user?.business_id || effectiveBizId?.() || '';
+    const pRes = await API.get('/products' + qs({ business_id: bizId || undefined, limit: 100 }));
+    const all = Array.isArray(pRes) ? pRes : (pRes?.data || []);
+    products = all.filter(p => p.active !== false && p.active !== 0);
+    if (!products.length) {
+      products = all; // fallback — barcha mahsulotlar
+    }
+  } catch (e) {
+    toast("Mahsulotlar ro'yxatini yuklab bo'lmadi: " + (e.message || 'Server xatosi'), 'error');
+    return;
+  }
+
+  if (!products.length) {
+    toast("Hozircha faol mahsulotlar mavjud emas", 'warning');
+    return;
+  }
+
+  openModal("Ro'yxatda bo'lmagan do'konga yetkazish", `
+    <form id="ext-delivery-form" autocomplete="off">
+      <div class="form-grid">
+
+        <div class="form-section-title">
+          <i class="fa-solid fa-store"></i> Do'kon / Mijoz ma'lumotlari
+        </div>
+
+        <div class="field span-2">
+          <label>Do'kon yoki mijoz nomi <span style="color:var(--color-danger)">*</span></label>
+          <input required id="ext-f-store-name" placeholder="Masalan: Yangi bozor yonidagi do'kon" autocomplete="off" />
+        </div>
+
+        <div class="field span-2">
+          <label>Manzil yoki lokatsiya <span style="color:var(--color-danger)">*</span></label>
+          <input required id="ext-f-address" placeholder="Masalan: Chilonzor 5-mavze, 12-uy" autocomplete="off" />
+        </div>
+
+        <div class="field span-2">
+          <label>Telefon raqami <span style="color:var(--color-text-muted); font-weight:400;">(ixtiyoriy)</span></label>
+          <input type="tel" id="ext-f-phone" placeholder="+998 90 123 45 67" />
+        </div>
+
+        <div class="form-section-title">
+          <i class="fa-solid fa-bread-slice"></i> Mahsulot ma'lumotlari
+        </div>
+
+        <div class="field span-2">
+          <label>Mahsulot <span style="color:var(--color-danger)">*</span></label>
+          <select required id="ext-f-product">
+            <option value="">-- Mahsulotni tanlang --</option>
+            ${products.map(p => `
+              <option value="${p.id}" data-price="${p.price || 0}">
+                ${escapeHtml(p.name)}${p.price ? ` — ${fmtMoney(p.price)}` : ''}
+              </option>
+            `).join('')}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Miqdori (dona) <span style="color:var(--color-danger)">*</span></label>
+          <input required type="number" id="ext-f-qty" min="1" step="1" placeholder="Masalan: 50" inputmode="numeric" />
+        </div>
+
+        <div class="field">
+          <label>Jami summa</label>
+          <input type="text" id="ext-f-total" readonly placeholder="—" style="background:var(--color-surface-2); color:var(--color-text-muted);" />
+        </div>
+
+        <div class="field span-2">
+          <label>Izoh <span style="color:var(--color-text-muted); font-weight:400;">(ixtiyoriy)</span></label>
+          <textarea id="ext-f-note" rows="2" placeholder="Masalan: Doimiy mijoz, chegirma berildi..."></textarea>
+        </div>
+
+      </div>
+
+      <div id="ext-delivery-form-error" class="form-error hidden" style="margin-bottom:12px;"></div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="ext-cancel-btn">Bekor qilish</button>
+        <button type="submit" class="btn btn-success" id="ext-save-btn" style="background:var(--color-green); border-color:var(--color-green);">
+          <i class="fa-solid fa-check"></i> Yetkazildi deb belgilash
+        </button>
+      </div>
+    </form>
+  `, (m) => {
+    const form      = m.querySelector('#ext-delivery-form');
+    const cancelBtn = m.querySelector('#ext-cancel-btn');
+    const saveBtn   = m.querySelector('#ext-save-btn');
+    const errorEl   = m.querySelector('#ext-delivery-form-error');
+    const prodSel   = m.querySelector('#ext-f-product');
+    const qtyInp    = m.querySelector('#ext-f-qty');
+    const totalInp  = m.querySelector('#ext-f-total');
+
+    cancelBtn.onclick = () => m.remove();
+
+    // Jami summani avtomatik hisoblash
+    function updateTotal() {
+      const opt = prodSel.options[prodSel.selectedIndex];
+      const price = opt ? Number(opt.dataset.price || 0) : 0;
+      const qty = parseInt(qtyInp.value, 10) || 0;
+      if (price > 0 && qty > 0) {
+        totalInp.value = fmtMoney(price * qty);
+      } else {
+        totalInp.value = '';
+      }
+    }
+    prodSel.addEventListener('change', updateTotal);
+    qtyInp.addEventListener('input', () => {
+      // Oldidagi nol ni olib tashlash
+      if (/^0[0-9]+/.test(qtyInp.value)) {
+        qtyInp.value = qtyInp.value.replace(/^0+/, '');
+      }
+      updateTotal();
+    });
+
+    // Form submit
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      errorEl.classList.add('hidden');
+      errorEl.textContent = '';
+
+      const storeName = m.querySelector('#ext-f-store-name').value.trim();
+      const address   = m.querySelector('#ext-f-address').value.trim();
+      const phone     = m.querySelector('#ext-f-phone').value.trim();
+      const productId = prodSel.value;
+      const qty       = parseInt(qtyInp.value, 10);
+      const note      = m.querySelector('#ext-f-note').value.trim();
+
+      // Validatsiya
+      if (!storeName) {
+        errorEl.textContent = "Do'kon yoki mijoz nomini kiriting";
+        errorEl.classList.remove('hidden');
+        m.querySelector('#ext-f-store-name').focus();
+        return;
+      }
+      if (!address) {
+        errorEl.textContent = "Manzil yoki lokatsiyani kiriting";
+        errorEl.classList.remove('hidden');
+        m.querySelector('#ext-f-address').focus();
+        return;
+      }
+      if (!productId) {
+        errorEl.textContent = "Iltimos, mahsulotni tanlang";
+        errorEl.classList.remove('hidden');
+        prodSel.focus();
+        return;
+      }
+      if (isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
+        errorEl.textContent = "Miqdor musbat butun son bo'lishi kerak (masalan: 1, 10, 50)";
+        errorEl.classList.remove('hidden');
+        qtyInp.focus();
+        return;
+      }
+
+      // Tasdiqlash oynasi
+      const selectedOpt = prodSel.options[prodSel.selectedIndex];
+      const productName = selectedOpt ? selectedOpt.text.split(' —')[0].trim() : 'Mahsulot';
+      const confirmMsg = `"${productName}" — ${qty} donani "${storeName}" ga yetkazilgan deb belgilaysizmi?`;
+
+      // Inline confirm (modal ichida)
+      const confirmed = await new Promise(resolve => {
+        const confirmDiv = document.createElement('div');
+        confirmDiv.className = 'ext-delivery-confirm-overlay';
+        confirmDiv.innerHTML = `
+          <div class="ext-delivery-confirm-box">
+            <div style="font-size:26px; margin-bottom:12px; color:var(--color-green);">
+              <i class="fa-solid fa-circle-question"></i>
+            </div>
+            <p style="margin:0 0 18px 0; font-size:var(--text-sm); line-height:1.6; color:var(--color-text);">
+              ${escapeHtml(confirmMsg)}
+            </p>
+            <div style="display:flex; gap:10px; justify-content:center;">
+              <button class="btn btn-secondary" id="ext-confirm-no">Yo'q, qaytish</button>
+              <button class="btn" id="ext-confirm-yes" style="background:var(--color-green); color:#fff; border-color:var(--color-green);">
+                <i class="fa-solid fa-check"></i> Ha, belgilash
+              </button>
+            </div>
+          </div>
+        `;
+        m.querySelector('.modal').appendChild(confirmDiv);
+        confirmDiv.querySelector('#ext-confirm-no').onclick = () => { confirmDiv.remove(); resolve(false); };
+        confirmDiv.querySelector('#ext-confirm-yes').onclick = () => { confirmDiv.remove(); resolve(true); };
+      });
+
+      if (!confirmed) return;
+
+      // API ga yuborish
+      await withButtonLoading(saveBtn, async () => {
+        const body = {
+          store_name:  storeName,
+          address:     address,
+          phone:       phone || undefined,
+          product_id:  Number(productId),
+          quantity:    qty,
+          note:        note || undefined
+        };
+
+        try {
+          await API.post('/deliveries/external', body);
+        } catch (apiErr) {
+          // Endpoint nomi farq qilsa alternativlarni sinab ko'ramiz
+          if (apiErr.status === 404) {
+            try {
+              await API.post('/deliveries/external', body);
+            } catch (altErr) {
+              throw altErr.status === 404 ? apiErr : altErr;
+            }
+          } else {
+            throw apiErr;
+          }
+        }
+
+        toast("Yetkazish muvaffaqiyatli qayd etildi!", 'success');
+        m.remove();
+        if (typeof onSuccess === 'function') onSuccess();
+      }, '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...');
+    };
+  });
+}
+
+
 async function renderDrivers(content) {
   const isSuperAdmin = state.user?.role === 'super_admin';
   const isBakeryAdmin = state.user?.role === 'bakery_admin';
@@ -3598,10 +3869,7 @@ function driverFormModal(defaultBizId, businesses = []) {
         return;
       }
 
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
-
-      try {
+      await withButtonLoading(submitBtn, async () => {
         // 1. Foydalanuvchini yaratish
         const primaryBizId = selectedBiz === 'all' ? (bizList[0]?.id || 1) : Number(selectedBiz);
         const payload = {
@@ -3668,11 +3936,7 @@ function driverFormModal(defaultBizId, businesses = []) {
         backdrop.remove();
         toast("Yangi haydovchi muvaffaqiyatli qo‘shildi va biriktirildi", 'success');
         render();
-      } catch (err) {
-        toast(err.message || "Haydovchini yaratishda xatolik", 'error');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Saqlash';
-      }
+      }, '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...');
     };
   });
 }
@@ -3770,10 +4034,7 @@ function editDriverModal(driver, businesses = []) {
         return;
       }
 
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...';
-
-      try {
+      await withButtonLoading(submitBtn, async () => {
         const payload = {
           full_name: fullName,
           business_id: businessId ? Number(businessId) : null,
@@ -3787,11 +4048,7 @@ function editDriverModal(driver, businesses = []) {
         backdrop.remove();
         toast("Haydovchi ma’lumotlari muvaffaqiyatli yangilandi", 'success');
         render();
-      } catch (err) {
-        toast(err.message || "Haydovchini yangilashda xatolik yuz berdi", 'error');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Saqlash';
-      }
+      }, '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...');
     };
   });
 }
@@ -4119,24 +4376,19 @@ function addStoreToDriverModal(driverItem = null, businesses = [], allDriverData
         return;
       }
 
-      const activeScope = Array.from(scopeRadios).find(r => r.checked)?.value || 'single';
+            const activeScope = Array.from(scopeRadios).find(r => r.checked)?.value || 'single';
 
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Biriktirilmoqda...';
-
-      try {
+      await withButtonLoading(submitBtn, async () => {
         if (activeScope === 'single') {
           // Bitta nonvoyxona
           const selectedBizId = singleBizSelect ? singleBizSelect.value : myBizId;
           if (!selectedBizId) {
             toast("Iltimos, nonvoyxonani tanlang", 'warning');
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
             return;
           }
 
           const checkedStoreInputs = singleStoresPicker ? singleStoresPicker.querySelectorAll('.single-store-item-cb:checked') : [];
-          
+
           if (checkedStoreInputs.length === 0) {
             // Aniq do'kon tanlanmagan -> Barcha do'konlarga biriktirish (store_id: null)
             await API.post('/delivery-assignments', {
@@ -4159,15 +4411,13 @@ function addStoreToDriverModal(driverItem = null, businesses = [], allDriverData
           const checkedBizInputs = Array.from(multiBizCbs).filter(cb => cb.checked);
           if (!checkedBizInputs.length) {
             toast("Iltimos, kamida bitta nonvoyxonani belgilang", 'warning');
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
             return;
           }
 
           const checkedStoreInputs = multiStoresPicker ? multiStoresPicker.querySelectorAll('.multi-store-item-cb:checked') : [];
-          
+
           if (checkedStoreInputs.length === 0) {
-            // Har bir belgilangan nonvoyxonaning barcha do'konlariga biriktirish (store_id: null)
+            // Har bir belgilangan nonvoyxonaning barcha do'konlarga biriktirish (store_id: null)
             for (const bCb of checkedBizInputs) {
               await API.post('/delivery-assignments', {
                 delivery_user_id: Number(selectedDriverId),
@@ -4199,11 +4449,6 @@ function addStoreToDriverModal(driverItem = null, businesses = [], allDriverData
         backdrop.remove();
         toast("Haydovchi muvaffaqiyatli biriktirildi", 'success');
         render();
-      } catch (err) {
-        toast(err.message || "Biriktirishda xatolik yuz berdi", 'error');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Biriktirish';
-      }
+      }, '<i class="fa-solid fa-spinner fa-spin"></i> Biriktirilmoqda...');
     };
-  });
-}
+  })}

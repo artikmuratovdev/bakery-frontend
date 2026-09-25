@@ -3189,3 +3189,141 @@ textarea {
     flex: 1;
   }
 }
+
+/* ==========================================================================
+   Ro'yxatdan Tashqari Yetkazish (External Delivery)
+   ========================================================================== */
+
+/* Asosiy ochish tugmasi */
+.ext-delivery-open-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 20px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  background: linear-gradient(135deg, #2d6a4f, #357a59);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 3px 12px rgba(53, 122, 89, 0.28);
+  cursor: pointer;
+  transition: opacity 0.18s, transform 0.18s, box-shadow 0.18s;
+  letter-spacing: 0.01em;
+}
+
+.ext-delivery-open-btn:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(53, 122, 89, 0.35);
+}
+
+.ext-delivery-open-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(53, 122, 89, 0.2);
+}
+
+.ext-delivery-open-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ext-delivery-new-badge {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 20px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Inline tasdiqlash overlay (modal ichida) */
+.ext-delivery-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  animation: ext-confirm-in 0.18s ease;
+}
+
+@keyframes ext-confirm-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.ext-delivery-confirm-box {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 28px 28px 24px;
+  max-width: 340px;
+  width: 90%;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+}
+
+/* Bugungi tashqi yetkazishlar kartasi */
+.ext-deliveries-today-card {
+  border-left: 3px solid var(--color-green);
+  animation: fadeInUp 0.25s ease;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* forma-error */
+.form-error {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border: 1px solid rgba(185, 74, 66, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-error.hidden {
+  display: none;
+}
+
+/* Dark theme adjustments */
+[data-theme="dark"] .ext-delivery-open-btn {
+  box-shadow: 0 3px 12px rgba(53, 122, 89, 0.4);
+}
+
+[data-theme="dark"] .ext-delivery-confirm-overlay {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .ext-delivery-confirm-box {
+  background: var(--color-surface);
+}
+
+/* Mobile responsive */
+@media (max-width: 600px) {
+  .ext-delivery-open-btn {
+    font-size: var(--text-xs);
+    padding: 12px 16px;
+    gap: 8px;
+  }
+
+  .ext-delivery-confirm-box {
+    padding: 22px 18px 20px;
+  }
+}

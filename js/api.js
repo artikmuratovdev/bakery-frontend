@@ -348,6 +348,8 @@ const API = {
     } else if (url.includes('/orders') || url.includes('/deliveries')) {
       ApiCache.invalidate('/orders');
       ApiCache.invalidate('/deliveries');
+    } else if (url.includes('/deliveries/external')) {
+      ApiCache.invalidate('/deliveries/external');
     } else {
       ApiCache.invalidate(url);
     }
@@ -438,6 +440,54 @@ const API = {
   del(url) { return this.request('DELETE', url); },
   checkHeartbeat() { return this.get('/heartbeat', { bypassCache: true }); }
 };
+
+/* ===================== Button Loading State Utility ===================== */
+/**
+ * Tugma yuklanish holatini boshqarish uchun utilita.
+ * @param {HTMLButtonElement} btn - Tugma elementi
+ * @param {string} loadingText - Yuklanishdagi matn (ixtiyoriy, standart: spinner)
+ * @returns {object} - { disable(), enable(), restore() } metodlari bilan obyekt
+ */
+function setButtonLoading(btn, loadingText = '') {
+  if (!btn) return { disable: () => {}, enable: () => {}, restore: () => {} };
+
+  const originalHtml = btn.innerHTML;
+  const originalDisabled = btn.disabled;
+
+  function disable() {
+    btn.disabled = true;
+    btn.innerHTML = loadingText || `<i class="fa-solid fa-spinner fa-spin"></i> Yuklanmoqda...`;
+  }
+
+  function enable() {
+    btn.disabled = originalDisabled;
+    btn.innerHTML = originalHtml;
+  }
+
+  function restore() {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+
+  return { disable, enable, restore };
+}
+
+/**
+ * Async funksiya tugma loading holati bilan bajarilishi uchun helper.
+ * @param {HTMLButtonElement} btn - Tugma elementi
+ * @param {Function} asyncFn - Bajariladigan async funksiya
+ * @param {string} loadingText - Yuklanishdagi matn (ixtiyoriy)
+ * @returns {Promise<any>} - asyncFn natijasi
+ */
+async function withButtonLoading(btn, asyncFn, loadingText = '') {
+  const { disable, restore } = setButtonLoading(btn, loadingText);
+  disable();
+  try {
+    return await asyncFn();
+  } finally {
+    restore();
+  }
+}
 
 function qs(params) {
   const clean = Object.entries(params || {}).filter(([, v]) => v !== undefined && v !== null && v !== '');
