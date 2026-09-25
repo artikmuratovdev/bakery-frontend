@@ -331,6 +331,24 @@ function isDeliveryUser() {
   return state.user?.role === 'delivery' || state.user?.role === 'dostavkachi';
 }
 
+function canAccessBusiness(businessId, user = state.user) {
+  if (!user || businessId === undefined || businessId === null || businessId === '') return false;
+  if (user.all_businesses === true) return true;
+  if (Array.isArray(user.business_ids)) {
+    return user.business_ids.some(id => String(id) === String(businessId));
+  }
+  return user.business_id !== undefined && String(user.business_id) === String(businessId);
+}
+
+function canAccessStore(businessId, storeId, user = state.user) {
+  if (!canAccessBusiness(businessId, user) || storeId === undefined || storeId === null || storeId === '') return false;
+  if (user.all_stores === true) return true;
+  if (Array.isArray(user.store_ids)) {
+    return user.store_ids.some(id => String(id) === String(storeId));
+  }
+  return user.store_id !== undefined && String(user.store_id) === String(storeId);
+}
+
 function roleLabel(role) {
   return {
     super_admin: 'Super Admin',
@@ -506,6 +524,7 @@ async function render(isRevalidating = false) {
   try {
     if (view === 'dashboard' || !view) await renderDashboard(content);
     else if (view === 'delivery' && param === 'history') await renderDeliveryDashboard(content, 'history');
+    else if (view === 'delivery' && param === 'external') await renderDeliveryDashboard(content, 'external');
     else if (view === 'delivery') await renderDeliveryDashboard(content, 'active');
     else if (view === 'drivers') await renderDrivers(content);
     else if (view === 'businesses') await renderBusinesses(content);

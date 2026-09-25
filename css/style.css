@@ -1376,6 +1376,7 @@ tbody tr:hover {
 .field {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .field.span-2 {
@@ -3317,6 +3318,55 @@ textarea {
 
 /* Mobile responsive */
 @media (max-width: 600px) {
+  .modal-body {
+    overflow-x: hidden;
+  }
+
+  #ext-delivery-form .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #ext-delivery-form .field,
+  #ext-delivery-form .field.span-2,
+  #ext-delivery-form .form-section-title {
+    grid-column: span 1;
+    min-width: 0;
+  }
+
+  #ext-delivery-form {
+    margin: -4px;
+  }
+
+  #ext-delivery-form .form-grid {
+    gap: 10px;
+  }
+
+  #ext-delivery-form .form-section-title {
+    margin-top: 4px;
+    margin-bottom: 0;
+    padding-bottom: 4px;
+  }
+
+  #ext-delivery-form .field label {
+    font-size: var(--text-xs);
+    margin-bottom: 4px;
+  }
+
+  #ext-delivery-form input,
+  #ext-delivery-form select,
+  #ext-delivery-form textarea {
+    min-height: 36px;
+    padding: 8px 10px;
+  }
+
+  #ext-delivery-form textarea {
+    min-height: 58px;
+  }
+
+  #ext-delivery-form .form-actions {
+    gap: 8px;
+  }
+
   .ext-delivery-open-btn {
     font-size: var(--text-xs);
     padding: 12px 16px;

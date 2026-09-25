@@ -2370,9 +2370,9 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     </div>
   `;
 
-  let activeTab = currentTab === 'history' ? 'history' : 'active';
+  let activeTab = ['history', 'external'].includes(currentTab) ? currentTab : 'active';
   let searchQuery = '';
-  let selectedStatus = activeTab === 'history' ? 'completed' : 'approved';
+  let selectedStatus = activeTab === 'active' ? 'approved' : 'completed';
   let counts = { approved: null, completed: null };
   let ordersList = [];
   let page = 1;
@@ -2381,6 +2381,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
 
   async function loadData(isBackground = false) {
     try {
+      if (activeTab === 'external') {
+        ordersList = [];
+        currentPagination = { page: 1, limit: 50, total: 0, totalPages: 1 };
+        renderUI();
+        return;
+      }
+
       // Driverdan doim status=approved yoki status=completed bo'lib ketadi
       const currentStatus = (selectedStatus === 'completed' || activeTab === 'history') ? 'completed' : 'approved';
       selectedStatus = currentStatus;
@@ -2389,8 +2396,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       const res = await API.get(endpoint, { bypassCache: true });
       const { items, pagination } = extractListData(res, page, limit);
       
-      // Driver uchun faqat approved va completed zakazlar
-      ordersList = items.filter(o => o && o.status === currentStatus);
+      // Driver faqat tokenidagi business/store ruxsatlariga mos zakazlarni ko'radi.
+      ordersList = items.filter(o => {
+        if (!o || o.status !== currentStatus) return false;
+        const businessId = o.business_id ?? o.store?.business_id ?? o.store?.business?.id;
+        const storeId = o.store_id ?? o.store?.id;
+        return canAccessBusiness(businessId) && canAccessStore(businessId, storeId);
+      });
       currentPagination = pagination;
       counts[currentStatus] = pagination.total;
       renderUI();
@@ -2464,9 +2476,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
               Yetkazilganlar
               ${historyBadge !== '' ? `<span class="delivery-tab-badge">${historyBadge}</span>` : ''}
             </button>
+            <button class="delivery-tab-btn ${activeTab === 'external' ? 'active' : ''}" id="tab-external-btn">
+              <i class="fa-solid fa-box-open"></i>
+              Ro'yxatdan tashqari
+            </button>
           </div>
 
-          <div style="display:flex; align-items:center; gap:8px; min-width:280px; flex:1; max-width:520px;">
+          <div style="display:${activeTab === 'external' ? 'none' : 'flex'}; align-items:center; gap:8px; min-width:280px; flex:1; max-width:520px;">
             <select id="delivery-status-filter" style="height:38px; padding:0 8px; font-size:var(--text-xs); border-radius:var(--radius-md); border:1px solid var(--color-border); background:var(--color-surface-2); color:var(--color-text); cursor:pointer;" title="Status bo'yicha filterlash">
               <option value="approved" ${selectedStatus === 'approved' ? 'selected' : ''}>Tasdiqlangan (approved)</option>
               <option value="completed" ${selectedStatus === 'completed' ? 'selected' : ''}>Bajarilgan (completed)</option>
@@ -2496,18 +2512,16 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
               <i class="fa-solid ${activeTab === 'active' ? 'fa-truck-ramp-box' : 'fa-clipboard-check'}"></i>
             </div>
             <h3 style="margin:0 0 6px 0; color:var(--color-text);">
-              ${activeTab === 'active' ? "Hozircha tasdiqlangan zakazlar mavjud emas" : "Hozircha yetkazilgan zakazlar mavjud emas"}
+              ${activeTab === 'active' ? "Hozircha tasdiqlangan zakazlar mavjud emas" : activeTab === 'history' ? "Hozircha yetkazilgan zakazlar mavjud emas" : "Hozircha ro'yxatdan tashqari yetkazishlar mavjud emas"}
             </h3>
             <p style="margin:0; font-size:var(--text-xs); color:var(--color-text-muted);">
-              ${activeTab === 'active' ? "Nonvoyxona admini tomonidan tasdiqlangan yangi zakazlar bu yerda avtomatik paydo bo'ladi." : "Yetkazib berilgan barcha zakazlar tarixi shu yerda saqlanadi."}
+              ${activeTab === 'active' ? "Nonvoyxona admini tomonidan tasdiqlangan yangi zakazlar bu yerda avtomatik paydo bo'ladi." : activeTab === 'history' ? "Yetkazib berilgan barcha zakazlar tarixi shu yerda saqlanadi." : "Ro'yxatda bo'lmagan do'konlarga yetkazilganlar shu yerda ko'rsatiladi."}
             </p>
           </div>
         `}
       </div>
-      ${renderPaginationHtml(currentPagination, 'deliv-pg')}
+      ${activeTab === 'external' ? '' : renderPaginationHtml(currentPagination, 'deliv-pg')}
 
-      <!-- Bugungi tashqi yetkazishlar bo'limi -->
-      <div id="ext-deliveries-section" style="margin-top:28px;"></div>
     `;
 
     bindPaginationEvents(content, currentPagination, (newPage) => {
@@ -2548,6 +2562,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
 
     const tabActive = content.querySelector('#tab-active-btn');
     const tabHist = content.querySelector('#tab-history-btn');
+    const tabExternal = content.querySelector('#tab-external-btn');
     if (tabActive) {
       tabActive.onclick = async () => {
         if (activeTab === 'active' && selectedStatus === 'approved') return;
@@ -2565,6 +2580,16 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         selectedStatus = 'completed';
         page = 1;
         location.hash = '#/delivery/history';
+        await loadData();
+      };
+    }
+    if (tabExternal) {
+      tabExternal.onclick = async () => {
+        if (activeTab === 'external') return;
+        activeTab = 'external';
+        selectedStatus = 'completed';
+        page = 1;
+        location.hash = '#/delivery/external';
         await loadData();
       };
     }
@@ -2704,13 +2729,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       extDeliveryBtn.onclick = () => externalDeliveryModal(loadExtDeliveriesSection);
     }
 
-    // Bugungi tashqi yetkazishlarni yuklash
-    loadExtDeliveriesSection();
+    // Tashqi yetkazishlar alohida tabda ko'rsatiladi.
+    if (activeTab === 'external') loadExtDeliveriesSection();
   }
 
   // Bugungi tashqi yetkazishlar bo'limini render qilish
   async function loadExtDeliveriesSection() {
-    const section = content.querySelector('#ext-deliveries-section');
+    const section = content.querySelector('#delivery-orders-list');
     if (!section) return;
     try {
       const today = todayStr();
@@ -2718,15 +2743,17 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       const list = Array.isArray(res) ? res : (res?.data || res?.deliveries || []);
 
       if (!list.length) {
-        section.innerHTML = '';
         return;
       }
 
-      section.innerHTML = `
-        <div class="card ext-deliveries-today-card">
+      const emptyState = section.querySelector('.delivery-empty-state');
+      if (emptyState) emptyState.remove();
+
+      section.insertAdjacentHTML('beforeend', `
+        <div class="card ext-deliveries-today-card" style="margin-top:20px;">
           <div class="card-header" style="display:flex; align-items:center; gap:10px;">
-            <i class="fa-solid fa-map-location-dot" style="color:var(--color-green); font-size:16px;"></i>
-            <h3 style="margin:0;">Bugungi ro'yxatdan tashqari yetkazishlar</h3>
+            <i class="fa-solid fa-box-open" style="color:var(--color-green); font-size:16px;"></i>
+            <h3 style="margin:0;">Ro'yxatdan tashqari yetkazilganlar</h3>
             <span class="badge badge-green" style="margin-left:auto;">${list.length} ta</span>
           </div>
           <div class="table-wrap">
@@ -2734,9 +2761,10 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
               <thead>
                 <tr>
                   <th>Do'kon / Mijoz</th>
-                  <th>Manzil</th>
                   <th>Mahsulot</th>
                   <th class="text-right">Miqdor</th>
+                  <th class="text-right">Naqd</th>
+                  <th class="text-right">Nasiya</th>
                   <th>Vaqt</th>
                 </tr>
               </thead>
@@ -2748,9 +2776,10 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                   return `
                     <tr>
                       <td><strong>${escapeHtml(d.store_name || d.client_name || '—')}</strong></td>
-                      <td class="muted">${escapeHtml(d.address || d.location || '—')}</td>
                       <td>${escapeHtml(productName)}</td>
                       <td class="text-right num"><strong>${qty} dona</strong></td>
+                      <td class="text-right num">${fmtMoney(d.cash_amount)}</td>
+                      <td class="text-right num">${fmtMoney(d.credit_amount)}</td>
                       <td class="muted" style="white-space:nowrap;">${time}</td>
                     </tr>
                   `;
@@ -2759,11 +2788,9 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
             </table>
           </div>
         </div>
-      `;
+      `);
     } catch (err) {
-      // Endpoint mavjud bo'lmasa yoki xatolik — bo'limni yashirish
-      const s2 = content.querySelector('#ext-deliveries-section');
-      if (s2) s2.innerHTML = '';
+      // Endpoint mavjud bo'lmasa yoki xatolik — asosiy tarixni ko'rsatishda davom etamiz
     }
   }
 
@@ -2961,11 +2988,6 @@ async function externalDeliveryModal(onSuccess) {
         </div>
 
         <div class="field span-2">
-          <label>Manzil yoki lokatsiya <span style="color:var(--color-danger)">*</span></label>
-          <input required id="ext-f-address" placeholder="Masalan: Chilonzor 5-mavze, 12-uy" autocomplete="off" />
-        </div>
-
-        <div class="field span-2">
           <label>Telefon raqami <span style="color:var(--color-text-muted); font-weight:400;">(ixtiyoriy)</span></label>
           <input type="tel" id="ext-f-phone" placeholder="+998 90 123 45 67" />
         </div>
@@ -2996,6 +3018,16 @@ async function externalDeliveryModal(onSuccess) {
           <input type="text" id="ext-f-total" readonly placeholder="—" style="background:var(--color-surface-2); color:var(--color-text-muted);" />
         </div>
 
+        <div class="field">
+          <label>Naqd summa</label>
+          <input type="number" id="ext-f-cash-amount" min="0" step="100" value="0" inputmode="numeric" placeholder="0" readonly />
+        </div>
+
+        <div class="field">
+          <label>Nasiya summa</label>
+          <input type="number" id="ext-f-credit-amount" min="0" step="100" value="0" inputmode="numeric" placeholder="0" />
+        </div>
+
         <div class="field span-2">
           <label>Izoh <span style="color:var(--color-text-muted); font-weight:400;">(ixtiyoriy)</span></label>
           <textarea id="ext-f-note" rows="2" placeholder="Masalan: Doimiy mijoz, chegirma berildi..."></textarea>
@@ -3020,19 +3052,35 @@ async function externalDeliveryModal(onSuccess) {
     const prodSel   = m.querySelector('#ext-f-product');
     const qtyInp    = m.querySelector('#ext-f-qty');
     const totalInp  = m.querySelector('#ext-f-total');
+    const cashInp   = m.querySelector('#ext-f-cash-amount');
+    const creditInp = m.querySelector('#ext-f-credit-amount');
 
     cancelBtn.onclick = () => m.remove();
 
-    // Jami summani avtomatik hisoblash
-    function updateTotal() {
+    function getTotalAmount() {
       const opt = prodSel.options[prodSel.selectedIndex];
       const price = opt ? Number(opt.dataset.price || 0) : 0;
       const qty = parseInt(qtyInp.value, 10) || 0;
-      if (price > 0 && qty > 0) {
-        totalInp.value = fmtMoney(price * qty);
+      return price > 0 && qty > 0 ? price * qty : 0;
+    }
+
+    function updatePaymentSplit() {
+      const totalAmount = getTotalAmount();
+      const creditAmount = Math.max(0, Number(creditInp.value) || 0);
+      const appliedCredit = totalAmount > 0 ? Math.min(creditAmount, totalAmount) : creditAmount;
+      creditInp.value = appliedCredit;
+      cashInp.value = Math.max(0, totalAmount - appliedCredit);
+    }
+
+    // Jami summani avtomatik hisoblash
+    function updateTotal() {
+      const totalAmount = getTotalAmount();
+      if (totalAmount > 0) {
+        totalInp.value = fmtMoney(totalAmount);
       } else {
         totalInp.value = '';
       }
+      updatePaymentSplit();
     }
     prodSel.addEventListener('change', updateTotal);
     qtyInp.addEventListener('input', () => {
@@ -3042,6 +3090,7 @@ async function externalDeliveryModal(onSuccess) {
       }
       updateTotal();
     });
+    creditInp.addEventListener('input', updatePaymentSplit);
 
     // Form submit
     form.onsubmit = async (e) => {
@@ -3050,10 +3099,11 @@ async function externalDeliveryModal(onSuccess) {
       errorEl.textContent = '';
 
       const storeName = m.querySelector('#ext-f-store-name').value.trim();
-      const address   = m.querySelector('#ext-f-address').value.trim();
       const phone     = m.querySelector('#ext-f-phone').value.trim();
       const productId = prodSel.value;
       const qty       = parseInt(qtyInp.value, 10);
+      const cashAmount = Number(cashInp.value) || 0;
+      const creditAmount = Number(creditInp.value) || 0;
       const note      = m.querySelector('#ext-f-note').value.trim();
 
       // Validatsiya
@@ -3063,10 +3113,10 @@ async function externalDeliveryModal(onSuccess) {
         m.querySelector('#ext-f-store-name').focus();
         return;
       }
-      if (!address) {
-        errorEl.textContent = "Manzil yoki lokatsiyani kiriting";
+      if (cashAmount < 0 || creditAmount < 0) {
+        errorEl.textContent = "Naqd va nasiya summasi manfiy bo'lishi mumkin emas";
         errorEl.classList.remove('hidden');
-        m.querySelector('#ext-f-address').focus();
+        cashInp.focus();
         return;
       }
       if (!productId) {
@@ -3082,8 +3132,22 @@ async function externalDeliveryModal(onSuccess) {
         return;
       }
 
-      // Tasdiqlash oynasi
       const selectedOpt = prodSel.options[prodSel.selectedIndex];
+      const totalAmount = (Number(selectedOpt?.dataset.price || 0) || 0) * qty;
+      if (cashAmount + creditAmount <= 0) {
+        errorEl.textContent = "Naqd yoki nasiya summasidan kamida bittasini kiriting";
+        errorEl.classList.remove('hidden');
+        cashInp.focus();
+        return;
+      }
+      if (totalAmount > 0 && cashAmount + creditAmount !== totalAmount) {
+        errorEl.textContent = `Naqd va nasiya summasi jami ${fmtMoney(totalAmount)} bo'lishi kerak`;
+        errorEl.classList.remove('hidden');
+        cashInp.focus();
+        return;
+      }
+
+      // Tasdiqlash oynasi
       const productName = selectedOpt ? selectedOpt.text.split(' —')[0].trim() : 'Mahsulot';
       const confirmMsg = `"${productName}" — ${qty} donani "${storeName}" ga yetkazilgan deb belgilaysizmi?`;
 
@@ -3118,10 +3182,11 @@ async function externalDeliveryModal(onSuccess) {
       await withButtonLoading(saveBtn, async () => {
         const body = {
           store_name:  storeName,
-          address:     address,
           phone:       phone || undefined,
           product_id:  Number(productId),
           quantity:    qty,
+          cash_amount: cashAmount,
+          credit_amount: creditAmount,
           note:        note || undefined
         };
 
@@ -4376,9 +4441,11 @@ function addStoreToDriverModal(driverItem = null, businesses = [], allDriverData
         return;
       }
 
-            const activeScope = Array.from(scopeRadios).find(r => r.checked)?.value || 'single';
+      const activeScope = Array.from(scopeRadios).find(r => r.checked)?.value || 'single';
 
       await withButtonLoading(submitBtn, async () => {
+        const payload = { delivery_user_id: Number(selectedDriverId) };
+
         if (activeScope === 'single') {
           // Bitta nonvoyxona
           const selectedBizId = singleBizSelect ? singleBizSelect.value : myBizId;
@@ -4388,24 +4455,12 @@ function addStoreToDriverModal(driverItem = null, businesses = [], allDriverData
           }
 
           const checkedStoreInputs = singleStoresPicker ? singleStoresPicker.querySelectorAll('.single-store-item-cb:checked') : [];
-
-          if (checkedStoreInputs.length === 0) {
-            // Aniq do'kon tanlanmagan -> Barcha do'konlarga biriktirish (store_id: null)
-            await API.post('/delivery-assignments', {
-              delivery_user_id: Number(selectedDriverId),
-              business_id: Number(selectedBizId),
-              store_id: null
-            }).catch(() => {});
-          } else {
-            // Aniq tanlangan do'konlarga biriktirish
-            for (const cb of checkedStoreInputs) {
-              await API.post('/delivery-assignments', {
-                delivery_user_id: Number(selectedDriverId),
-                business_id: Number(selectedBizId),
-                store_id: Number(cb.value)
-              }).catch(() => {});
-            }
-          }
+          payload.assignments = [{
+            business_id: Number(selectedBizId),
+            ...(checkedStoreInputs.length > 0
+              ? { store_ids: Array.from(checkedStoreInputs).map(cb => Number(cb.value)) }
+              : {})
+          }];
         } else if (activeScope === 'multiple') {
           // Bir nechta nonvoyxona
           const checkedBizInputs = Array.from(multiBizCbs).filter(cb => cb.checked);
@@ -4415,37 +4470,20 @@ function addStoreToDriverModal(driverItem = null, businesses = [], allDriverData
           }
 
           const checkedStoreInputs = multiStoresPicker ? multiStoresPicker.querySelectorAll('.multi-store-item-cb:checked') : [];
-
-          if (checkedStoreInputs.length === 0) {
-            // Har bir belgilangan nonvoyxonaning barcha do'konlarga biriktirish (store_id: null)
-            for (const bCb of checkedBizInputs) {
-              await API.post('/delivery-assignments', {
-                delivery_user_id: Number(selectedDriverId),
-                business_id: Number(bCb.value),
-                store_id: null
-              }).catch(() => {});
-            }
-          } else {
-            // Tanlangan do'konlarga biriktirish
-            for (const sCb of checkedStoreInputs) {
-              await API.post('/delivery-assignments', {
-                delivery_user_id: Number(selectedDriverId),
-                business_id: Number(sCb.dataset.bizId),
-                store_id: Number(sCb.value)
-              }).catch(() => {});
-            }
-          }
+          payload.assignments = checkedBizInputs.map(bCb => {
+            const storeIds = Array.from(checkedStoreInputs)
+              .filter(sCb => String(sCb.dataset.bizId) === String(bCb.value))
+              .map(sCb => Number(sCb.value));
+            return {
+              business_id: Number(bCb.value),
+              ...(storeIds.length > 0 ? { store_ids: storeIds } : {})
+            };
+          });
         } else if (activeScope === 'all') {
-          // Barcha nonvoyxonalar
-          for (const b of bizList) {
-            await API.post('/delivery-assignments', {
-              delivery_user_id: Number(selectedDriverId),
-              business_id: Number(b.id),
-              store_id: null
-            }).catch(() => {});
-          }
+          payload.all_businesses = true;
         }
 
+        await API.post('/delivery-assignments/bulk', payload);
         backdrop.remove();
         toast("Haydovchi muvaffaqiyatli biriktirildi", 'success');
         render();
