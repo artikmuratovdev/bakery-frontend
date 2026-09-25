@@ -230,10 +230,14 @@ function showLogin() {
 
 async function onLogin(e) {
   e.preventDefault();
+  const submitBtn = document.getElementById('login-submit-btn');
+
+  // Agar request allaqachon ketayotgan bo'lsa, takroriy yuborishni oldini olamiz
+  if (submitBtn && submitBtn.disabled) return;
+
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
   const errEl = document.getElementById('login-error');
-  const submitBtn = document.getElementById('login-submit-btn');
   
   if (errEl) errEl.classList.add('hidden');
   if (submitBtn) {

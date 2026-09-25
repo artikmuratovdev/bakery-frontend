@@ -474,12 +474,18 @@ function setButtonLoading(btn, loadingText = '') {
 
 /**
  * Async funksiya tugma loading holati bilan bajarilishi uchun helper.
+ * Request ketayotganda tugma disabled bo'ladi va qaytib yoqilmagunicha
+ * takroriy bosish e'tiborga olinmaydi (double-submit himoyasi).
  * @param {HTMLButtonElement} btn - Tugma elementi
  * @param {Function} asyncFn - Bajariladigan async funksiya
  * @param {string} loadingText - Yuklanishdagi matn (ixtiyoriy)
- * @returns {Promise<any>} - asyncFn natijasi
+ * @returns {Promise<any>} - asyncFn natijasi yoki undefined (agar allaqachon bajarilayotgan bo'lsa)
  */
 async function withButtonLoading(btn, asyncFn, loadingText = '') {
+  // Agar tugma allaqachon disabled bo'lsa (ya'ni boshqa request ketayotgan bo'lsa),
+  // yangi so'rov yubormay chiqib ketamiz
+  if (btn && btn.disabled) return;
+
   const { disable, restore } = setButtonLoading(btn, loadingText);
   disable();
   try {
