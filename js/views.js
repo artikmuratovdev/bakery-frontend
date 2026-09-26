@@ -721,8 +721,19 @@ function productFormModal(product, defaultBizId) {
 /* ===================== STORES ===================== */
 async function renderStores(content) {
   const bizId = effectiveBizId();
-  const bizName = (id) => (Array.isArray(state.businesses) ? state.businesses : []).find(b => b.id == id)?.name || '';
   const canManage = state.user.role === 'super_admin' || state.user.role === 'bakery_admin';
+
+  // Do'kon uchun barcha ulangan nonvoyxonalar nomlarini badge ko'rinishida render qilish
+  function storeBusinessBadges(store) {
+    const bizList = Array.isArray(store.businesses) && store.businesses.length
+      ? store.businesses
+      : (Array.isArray(store.business_ids) ? store.business_ids.map(id => {
+          const found = (state.businesses || []).find(b => b.id == id);
+          return found || { id, name: `Nonvoyxona #${id}` };
+        }) : (store.business_id ? [{ id: store.business_id, name: (state.businesses || []).find(b => b.id == store.business_id)?.name || `Nonvoyxona #${store.business_id}` }] : []));
+    if (!bizList.length) return '<span class="muted">—</span>';
+    return bizList.map(b => `<span class="badge badge-blue" style="margin:1px 2px;font-size:11px;">${escapeHtml(b.name)}</span>`).join('');
+  }
 
   let page = 1;
   const limit = 10;
@@ -743,11 +754,11 @@ async function renderStores(content) {
             ${canManage ? `<button class="btn btn-primary btn-sm" id="add-store-btn">+ Yangi do'kon</button>` : ''}
           </div>
           <div class="table-wrap"><table>
-            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th>Manzil</th><th>Telefon</th><th>Holati</th><th></th></tr></thead>
+            <thead><tr><th>Nonvoyxona(lar)</th><th>Nomi</th><th>Manzil</th><th>Telefon</th><th>Holati</th><th></th></tr></thead>
             <tbody>
               ${list.map(s => `
                 <tr>
-                  ${!bizId ? `<td class="muted">${escapeHtml(bizName(s.business_id))}</td>` : ''}
+                  <td>${storeBusinessBadges(s)}</td>
                   <td><a href="#/stores/${s.id}" style="color:var(--accent);font-weight:600;text-decoration:none;">${escapeHtml(s.name)}</a></td>
                   <td class="muted">${escapeHtml(s.address || '—')}</td>
                   <td class="muted">${escapeHtml(s.phone || '—')}</td>
@@ -760,7 +771,7 @@ async function renderStores(content) {
                     ` : ''}
                   </div></td>
                 </tr>
-              `).join('') || `<tr class="empty-row"><td colspan="${!bizId ? 6 : 5}">Do'kon qo'shilmagan</td></tr>`}
+              `).join('') || `<tr class="empty-row"><td colspan="6">Do'kon qo'shilmagan</td></tr>`}
             </tbody>
           </table></div>
           ${renderPaginationHtml(pagination, 'store-pg')}
@@ -799,12 +810,38 @@ async function renderStores(content) {
 function storeFormModal(store, defaultBizId) {
   const isNew = !store;
   const isSuperAdmin = state.user.role === 'super_admin';
+  const isBakeryAdmin = state.user.role === 'bakery_admin';
+  const bizList = Array.isArray(state.businesses) ? state.businesses : [];
+
+  // Do'konning joriy business_ids massivini aniqlash (edit uchun)
+  const currentBizIds = store
+    ? (Array.isArray(store.business_ids) ? store.business_ids.map(Number)
+        : (store.business_id ? [Number(store.business_id)] : []))
+    : (defaultBizId ? [Number(defaultBizId)] : []);
+
+  // Nonvoyxonalar checkboxlari HTML (super_admin va bakery_admin uchun)
+  function bizCheckboxesHtml() {
+    if (!bizList.length) return '<p class="muted">Nonvoyxonalar mavjud emas</p>';
+    return `<div class="biz-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;">
+      ${bizList.map(b => `
+        <label style="display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;">
+          <input type="checkbox" class="biz-checkbox" value="${b.id}" ${currentBizIds.includes(Number(b.id)) ? 'checked' : ''} style="width:15px;height:15px;" />
+          ${escapeHtml(b.name)}
+        </label>
+      `).join('')}
+    </div>`;
+  }
 
   openModal(store ? "Do'konni tahrirlash" : "Yangi do'kon", `
     <form id="store-form">
       <div class="form-grid">
         ${isNew ? `<div class="form-section-title"><i class="fa-solid fa-store"></i> Do'kon ma'lumotlari</div>` : ''}
-        ${isNew && isSuperAdmin ? `<div class="field span-2"><label>Nonvoyxona *</label>${bizSelectHtml('f-biz', defaultBizId || state.businesses[0]?.id)}</div>` : ''}
+        ${(isSuperAdmin || isBakeryAdmin) ? `
+          <div class="field span-2">
+            <label>Nonvoyxona(lar) * <span class="muted" style="font-weight:400;">(bir yoki bir nechtasini belgilang)</span></label>
+            ${bizCheckboxesHtml()}
+          </div>
+        ` : ''}
         <div class="field span-2"><label>Do'kon nomi *</label><input required id="f-name" value="${escapeHtml(store?.name || '')}" placeholder="Masalan: Do'kon №1 (Markaz)" /></div>
         <div class="field span-2"><label>Manzil (ixtiyoriy)</label><input id="f-address" value="${escapeHtml(store?.address || '')}" placeholder="Masalan: Amir Temur ko'chasi, 12" /></div>
         <div class="field span-2"><label>Telefon (ixtiyoriy)</label><input type="tel" pattern="[0-9+\\-\\s()]{7,20}" id="f-phone" value="${escapeHtml(store?.phone || '')}" placeholder="+998 90 123 45 67" title="Telefon raqami (masalan: +998 90 123 45 67)" /></div>
@@ -865,29 +902,33 @@ function storeFormModal(store, defaultBizId) {
         return;
       }
 
+      // Belgilangan nonvoyxonalar ID larini yig'ish
+      const checkedBoxes = m.querySelectorAll('.biz-checkbox:checked');
+      const selectedBizIds = Array.from(checkedBoxes).map(cb => Number(cb.value));
+
+      if ((isSuperAdmin || isBakeryAdmin) && !selectedBizIds.length) {
+        toast("Kamida bitta nonvoyxonani belgilang", 'error');
+        return;
+      }
+
       const body = {
         name: nameVal,
         address: addressVal,
         phone: phoneVal
       };
 
+      if (isSuperAdmin || isBakeryAdmin) {
+        body.business_ids = selectedBizIds;
+        // Orqaga moslik uchun birinchi ID ni ham yuborish
+        if (selectedBizIds.length === 1) body.business_id = selectedBizIds[0];
+      }
+
       if (!isNew) {
         const activeSel = m.querySelector('#f-store-active');
         if (activeSel) body.active = Number(activeSel.value);
-        if (store.business_id) body.business_id = Number(store.business_id);
       }
 
       if (isNew) {
-        if (isSuperAdmin) {
-          const bizEl = m.querySelector('#f-biz');
-          const bizIdVal = bizEl ? bizEl.value : defaultBizId;
-          if (!bizIdVal) {
-            toast("Nonvoyxonani tanlang", 'error');
-            return;
-          }
-          body.business_id = Number(bizIdVal) || bizIdVal;
-        }
-
         const usernameVal = m.querySelector('#f-username').value.trim();
         const pwdInput = m.querySelector('#f-password');
         const passwordVal = pwdInput ? pwdInput.value : '';
@@ -929,37 +970,87 @@ function storeFormModal(store, defaultBizId) {
 }
 
 async function renderStoreDetail(content, id) {
-  const data = await API.get(`/stores/${id}/history`);
   const canManage = state.user.role === 'super_admin' || state.user.role === 'bakery_admin';
-  content.innerHTML = `
-    <button class="btn btn-ghost btn-sm" id="back-btn" style="margin-bottom:14px;"><i class="fa-solid fa-arrow-left"></i> Orqaga</button>
-    <div class="section-head">
-      <h2>${escapeHtml(data.store.name)}</h2>
-      <p>${escapeHtml(data.store.address || '')} ${data.store.phone ? '· ' + escapeHtml(data.store.phone) : ''}</p>
-    </div>
-    <div class="grid grid-4" style="margin-bottom:20px;">
-      ${statCard('<i class="fa-solid fa-receipt"></i>', 'Jami sotuv', fmtMoney(data.summary.total_sales), '', '')}
-      ${statCard('<i class="fa-solid fa-money-bill-wave"></i>', 'Naqd', fmtMoney(data.summary.total_cash), '', 'green')}
-      ${statCard('<i class="fa-solid fa-clipboard-list"></i>', 'Nasiya berilgan', fmtMoney(data.summary.total_credit), '', 'blue')}
-      ${statCard('<i class="fa-solid fa-triangle-exclamation"></i>', 'Qolgan qarz', fmtMoney(data.summary.remaining_debt), '', 'red')}
-    </div>
-    <div class="card" style="margin-bottom:20px;">
-      <div class="card-header">
-        <h3>Mahsulot olish tarixi</h3>
-      </div>
-      ${renderDistTable(data.distributions, false)}
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <h3>Qarz to'lovlari tarixi</h3>
-        ${canManage ? `<button class="btn btn-primary btn-sm" id="add-payment-btn">+ Qarz to'lash</button>` : ''}
-      </div>
-      ${renderPaymentsTable(data.payments)}
-    </div>
-  `;
-  content.querySelector('#back-btn').onclick = () => location.hash = '#/stores';
-  const payBtn = content.querySelector('#add-payment-btn');
-  if (payBtn) payBtn.onclick = () => paymentFormModal(data.store, data.summary.remaining_debt);
+
+  // Do'konga tegishli nonvoyxonalar ro'yxatini olish (filtr uchun)
+  let selectedBizId = '';
+
+  async function loadHistory() {
+    try {
+      const url = `/stores/${id}/history` + qs({ business_id: selectedBizId || undefined });
+      const data = await API.get(url);
+
+      // Do'kon nonvoyxonalari ro'yxatini aniqlash
+      const storeBizList = Array.isArray(data.store?.businesses) && data.store.businesses.length
+        ? data.store.businesses
+        : (Array.isArray(data.store?.business_ids)
+            ? data.store.business_ids.map(bid => ({ id: bid, name: `Nonvoyxona #${bid}` }))
+            : []);
+
+      const summary = data.summary || {};
+
+      content.innerHTML = `
+        <button class="btn btn-ghost btn-sm" id="back-btn" style="margin-bottom:14px;"><i class="fa-solid fa-arrow-left"></i> Orqaga</button>
+        <div class="section-head">
+          <h2>${escapeHtml(data.store.name)}</h2>
+          <p>${escapeHtml(data.store.address || '')} ${data.store.phone ? '· ' + escapeHtml(data.store.phone) : ''}</p>
+        </div>
+
+        ${storeBizList.length > 1 ? `
+          <div class="filters-bar" style="margin-bottom:16px;">
+            <div class="field">
+              <label>Nonvoyxona bo'yicha filtr</label>
+              <select id="biz-filter">
+                <option value="">Barcha nonvoyxonalar</option>
+                ${storeBizList.map(b => `<option value="${b.id}" ${String(b.id) === String(selectedBizId) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="grid grid-4" style="margin-bottom:20px;">
+          ${statCard('<i class="fa-solid fa-receipt"></i>', 'Jami sotuv', fmtMoney(summary.total_sales), '', '')}
+          ${statCard('<i class="fa-solid fa-money-bill-wave"></i>', 'Naqd', fmtMoney(summary.total_cash), '', 'green')}
+          ${statCard('<i class="fa-solid fa-clipboard-list"></i>', 'Nasiya berilgan', fmtMoney(summary.total_credit), '', 'blue')}
+          ${statCard('<i class="fa-solid fa-triangle-exclamation"></i>', 'Qolgan qarz', fmtMoney(summary.remaining_debt), '', 'red')}
+        </div>
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-header"><h3>Mahsulot olish tarixi</h3></div>
+          ${renderDistTable(data.distributions || [], false)}
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>Qarz to'lovlari tarixi</h3>
+            ${canManage ? `<button class="btn btn-primary btn-sm" id="add-payment-btn">+ Qarz to'lash</button>` : ''}
+          </div>
+          ${renderPaymentsTable(data.payments || [])}
+        </div>
+      `;
+
+      content.querySelector('#back-btn').onclick = () => location.hash = '#/stores';
+
+      const bizFilter = content.querySelector('#biz-filter');
+      if (bizFilter) {
+        bizFilter.onchange = (e) => {
+          selectedBizId = e.target.value;
+          loadHistory();
+        };
+      }
+
+      const payBtn = content.querySelector('#add-payment-btn');
+      if (payBtn) payBtn.onclick = () => paymentFormModal(data.store, summary.remaining_debt);
+    } catch (err) {
+      content.innerHTML = `
+        <button class="btn btn-ghost btn-sm" id="back-btn" style="margin-bottom:14px;"><i class="fa-solid fa-arrow-left"></i> Orqaga</button>
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Do'kon ma'lumotlarini yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
+      content.querySelector('#back-btn').onclick = () => location.hash = '#/stores';
+    }
+  }
+
+  await loadHistory();
 }
 
 /* ===================== PRODUCTION ===================== */
@@ -1246,7 +1337,7 @@ async function renderDistributionList(content, bizId) {
 
 function distributionFormModal(defaultBizId) {
   const needsBizSelect = state.user.role === 'super_admin';
-  const initialBiz = defaultBizId || state.businesses[0]?.id;
+  const initialBiz = defaultBizId || effectiveBizId() || state.businesses[0]?.id;
   openModal("Yangi taqsimlash yozuvi", `
     <form id="dist-form">
       <div class="form-grid">
@@ -1276,26 +1367,59 @@ function distributionFormModal(defaultBizId) {
     let products = [], stock = [], currentTotal = 0;
 
     async function loadForBiz(bizId) {
-      const [loadedProducts, stores, loadedStock] = await Promise.all([
-        API.get('/products' + qs({ business_id: bizId, limit: 100 })),
-        API.get('/stores' + qs({ business_id: bizId, limit: 100 })),
-        API.get('/production/stock' + qs({ business_id: bizId, limit: 100 }))
-      ]);
-      products = Array.isArray(loadedProducts) ? loadedProducts : (loadedProducts?.data || []);
-      const storeList = Array.isArray(stores) ? stores : (stores?.data || []);
-      stock = Array.isArray(loadedStock) ? loadedStock : (loadedStock?.data || []);
-      m.querySelector('#f-product').innerHTML = products.map(p => `<option value="${p.id}" data-price="${p.price}">${escapeHtml(p.name)} — ${fmtMoney(p.price)}</option>`).join('') || `<option value="">Mahsulot yo'q</option>`;
-      m.querySelector('#f-store').innerHTML = storeList.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('') || `<option value="">Do'kon yo'q</option>`;
-      updateStockHint();
-      updateTotal();
+      try {
+        const [loadedProducts, stores, loadedStock] = await Promise.all([
+          API.get('/products' + qs({ business_id: bizId, limit: 100 })).catch(err => {
+            console.warn("Mahsulotlarni yuklashda xatolik:", err);
+            return [];
+          }),
+          API.get('/stores' + qs({ business_id: bizId, limit: 100 })).catch(err => {
+            console.warn("Do'konlarni yuklashda xatolik:", err);
+            return [];
+          }),
+          (bizId ? API.get('/production/stock' + qs({ business_id: bizId, limit: 100 })) : Promise.resolve([])).catch(err => {
+            console.warn("Zaxira (stock) yuklashda xatolik:", err);
+            return [];
+          })
+        ]);
+
+        const extractItems = (res, key) => {
+          if (!res) return [];
+          if (Array.isArray(res)) return res;
+          if (Array.isArray(res.data)) return res.data;
+          if (key && Array.isArray(res[key])) return res[key];
+          if (Array.isArray(res.items)) return res.items;
+          if (res.data && typeof res.data === 'object') {
+            if (key && Array.isArray(res.data[key])) return res.data[key];
+            if (Array.isArray(res.data.items)) return res.data.items;
+          }
+          return [];
+        };
+
+        products = extractItems(loadedProducts, 'products');
+        const storeList = extractItems(stores, 'stores');
+        stock = extractItems(loadedStock, 'stock');
+
+        m.querySelector('#f-product').innerHTML = products.map(p => `<option value="${p.id}" data-price="${p.price}">${escapeHtml(p.name)} — ${fmtMoney(p.price)}</option>`).join('') || `<option value="">Mahsulot yo'q</option>`;
+        m.querySelector('#f-store').innerHTML = storeList.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('') || `<option value="">Do'kon yo'q</option>`;
+        updateStockHint();
+        updateTotal();
+      } catch (err) {
+        console.error("loadForBiz xatosi:", err);
+      }
     }
 
     function updateStockHint() {
-      const bizId = needsBizSelect ? m.querySelector('#f-biz').value : effectiveBizId();
-      const productId = m.querySelector('#f-product').value;
-      if (!bizId || !productId) return;
-      const s = stock.find(x => x.product.id == productId);
-      m.querySelector('#f-stock-hint').textContent = s ? `Nonvoyxonada mavjud zaxira: ${fmtNum(s.remaining)} dona` : '';
+      const bizId = needsBizSelect ? m.querySelector('#f-biz')?.value : effectiveBizId();
+      const productId = m.querySelector('#f-product')?.value;
+      const hintEl = m.querySelector('#f-stock-hint');
+      if (!hintEl) return;
+      if (!bizId || !productId) {
+        hintEl.textContent = '';
+        return;
+      }
+      const s = stock.find(x => (x.product?.id || x.product_id || x.id) == productId);
+      hintEl.textContent = s ? `Nonvoyxonada mavjud zaxira: ${fmtNum(s.remaining)} dona` : '';
     }
 
     function updateTotal() {
@@ -1984,33 +2108,60 @@ async function renderOrders(content) {
 }
 
 async function orderCreateModal(onSuccess) {
-  let products = [];
-  try {
-    const bizId = effectiveBizId();
-    products = await API.get('/products' + qs({ business_id: bizId, limit: 100 }));
-    const checkList = Array.isArray(products) ? products : (products?.data || []);
-    if (!checkList.length) {
-      products = await API.get('/products?limit=100');
-    }
-  } catch (err) {
+  const isStoreUser = state.user?.role === 'store';
+
+  // Do'kon foydalanuvchisi uchun tegishli nonvoyxonalarni aniqlash
+  const userBizList = isStoreUser
+    ? (Array.isArray(state.user.businesses) && state.user.businesses.length
+        ? state.user.businesses
+        : (Array.isArray(state.user.business_ids)
+            ? state.user.business_ids.map(id => ({ id, name: `Nonvoyxona #${id}` }))
+            : (state.user.business_id ? [{ id: state.user.business_id, name: `Nonvoyxona #${state.user.business_id}` }] : [])))
+    : [];
+
+  const isMultiBiz = isStoreUser && userBizList.length > 1;
+
+  // Mahsulotlarni yuklash (biznesga qarab)
+  async function loadProducts(bizId) {
     try {
-      products = await API.get('/products?limit=100');
-    } catch (e) {
-      toast("Mahsulotlar ro'yxatini yuklab bo'lmadi", 'danger');
-      return;
+      const res = await API.get('/products' + qs({ business_id: bizId || undefined, limit: 100 }));
+      const list = Array.isArray(res) ? res : (res?.data || res?.products || []);
+      return list.filter(p => p.active !== false && p.active !== 0);
+    } catch (err) {
+      return [];
     }
   }
 
-  const prodList = Array.isArray(products) ? products : (products?.products || products?.data || []);
-  const activeProducts = prodList.filter(p => p.active !== false);
+  // Agar ko'p biznesli do'kon bo'lsa, avval bitta biznes tanlatamiz,
+  // keyin modal ichidan mahsulotlarni dinamik yuklaymiz.
+  // Agar bitta biznes bo'lsa — oldindan yuklaymiz va oddiy odam ko'radi.
+  let initialBizId = isStoreUser
+    ? (userBizList.length === 1 ? userBizList[0].id : null)
+    : effectiveBizId();
 
-  if (!activeProducts.length) {
+  let activeProducts = await loadProducts(initialBizId);
+
+  if (!isMultiBiz && !activeProducts.length) {
     toast("Hozircha buyurtma uchun faol mahsulotlar mavjud emas", 'warning');
     return;
   }
 
   openModal("Yangi zakaz yaratish", `
     <form id="order-create-form">
+      ${isMultiBiz ? `
+        <div class="field" style="margin-bottom:14px;">
+          <label style="font-weight:600;font-size:var(--text-sm);display:block;margin-bottom:6px;">
+            <i class="fa-solid fa-industry" style="margin-right:4px;color:var(--accent);"></i>
+            Qaysi nonvoyxonaga zakaz bermoqchisiz? *
+          </label>
+          <select id="f-order-biz" required>
+            <option value="">-- Nonvoyxonani tanlang --</option>
+            ${userBizList.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div id="order-products-section" style="display:none;">
+      ` : ''}
+
       <div style="margin-bottom:14px;">
         <label style="font-weight:600; font-size:var(--text-sm); display:block; margin-bottom:6px;">Zakaz mahsulotlari</label>
         <div class="order-items-box">
@@ -2034,6 +2185,8 @@ async function orderCreateModal(onSuccess) {
           <i class="fa-solid fa-paper-plane"></i> Zakazni yuborish
         </button>
       </div>
+
+      ${isMultiBiz ? '</div>' : ''}
     </form>
   `, (m) => {
     const rowsContainer = m.querySelector('#order-items-rows');
@@ -2042,10 +2195,11 @@ async function orderCreateModal(onSuccess) {
     const form = m.querySelector('#order-create-form');
     const errorEl = m.querySelector('#order-form-error');
     const submitBtn = m.querySelector('#order-submit-btn');
+    let selectedBizId = initialBizId ? String(initialBizId) : '';
 
     cancelBtn.onclick = () => m.remove();
 
-    function createRow(selectedProdId = '', initialQty = 1) {
+    function createRow(curProducts, selectedProdId = '', initialQty = 1) {
       const row = document.createElement('div');
       row.className = 'order-item-row';
       row.innerHTML = `
@@ -2053,7 +2207,7 @@ async function orderCreateModal(onSuccess) {
           <label>Mahsulot</label>
           <select class="item-product-select" required>
             <option value="">-- Mahsulotni tanlang --</option>
-            ${activeProducts.map(p => `
+            ${curProducts.map(p => `
               <option value="${p.id}" ${String(p.id) === String(selectedProdId) ? 'selected' : ''}>
                 ${escapeHtml(p.name)} ${p.price ? `(${fmtMoney(p.price)})` : ''}
               </option>
@@ -2082,16 +2236,62 @@ async function orderCreateModal(onSuccess) {
       rowsContainer.appendChild(row);
     }
 
-    createRow();
+    function rebuildRows(curProducts) {
+      rowsContainer.innerHTML = '';
+      createRow(curProducts);
+    }
+
+    // Ko'p biznesli holat: nonvoyxona tanlanganida mahsulotlarni yuklash
+    const bizSelect = m.querySelector('#f-order-biz');
+    const productsSection = m.querySelector('#order-products-section');
+
+    if (isMultiBiz && bizSelect) {
+      bizSelect.onchange = async (e) => {
+        selectedBizId = e.target.value;
+        if (!selectedBizId) {
+          if (productsSection) productsSection.style.display = 'none';
+          return;
+        }
+        submitBtn.disabled = true;
+        addRowBtn.disabled = true;
+        const loaded = await loadProducts(Number(selectedBizId));
+        activeProducts = loaded;
+        if (!loaded.length) {
+          toast("Bu nonvoyxona uchun faol mahsulotlar mavjud emas", 'warning');
+          if (productsSection) productsSection.style.display = 'none';
+          submitBtn.disabled = false;
+          addRowBtn.disabled = false;
+          return;
+        }
+        rebuildRows(loaded);
+        if (productsSection) productsSection.style.display = '';
+        submitBtn.disabled = false;
+        addRowBtn.disabled = false;
+      };
+    } else {
+      // Bitta biznes yoki admin — darhol mahsulotlarni ko'rsatish
+      rebuildRows(activeProducts);
+    }
 
     addRowBtn.onclick = () => {
-      createRow();
+      if (isMultiBiz && !selectedBizId) {
+        toast("Avval nonvoyxonani tanlang", 'warning');
+        return;
+      }
+      createRow(activeProducts);
     };
 
     form.onsubmit = async (e) => {
       e.preventDefault();
       errorEl.classList.add('hidden');
       errorEl.textContent = '';
+
+      if (isMultiBiz && !selectedBizId) {
+        errorEl.textContent = "Nonvoyxonani tanlang";
+        errorEl.classList.remove('hidden');
+        bizSelect?.focus();
+        return;
+      }
 
       const rows = rowsContainer.querySelectorAll('.order-item-row');
       if (!rows.length) {
@@ -2131,20 +2331,17 @@ async function orderCreateModal(onSuccess) {
         }
 
         selectedProductIds.add(prodId);
-        items.push({
-          product_id: prodId,
-          quantity: qty
-        });
+        items.push({ product_id: prodId, quantity: qty });
       }
 
       const note = m.querySelector('#f-order-note').value.trim();
 
-      await withButtonLoading(submitBtn, async () => {
-        await API.post('/orders', {
-          items,
-          note: note || undefined
-        });
+      const orderBody = { items, note: note || undefined };
+      // Ko'p nonvoyxonali holatda tanlangan business_id ni qo'shamiz
+      if (selectedBizId) orderBody.business_id = Number(selectedBizId);
 
+      await withButtonLoading(submitBtn, async () => {
+        await API.post('/orders', orderBody);
         toast("Zakaz muvaffaqiyatli yuborildi!", 'success');
         m.remove();
         if (onSuccess) onSuccess();
@@ -2152,6 +2349,7 @@ async function orderCreateModal(onSuccess) {
     };
   });
 }
+
 
 function orderDetailModal(order, onUpdate) {
   const isSuperAdmin = state.user.role === 'super_admin';

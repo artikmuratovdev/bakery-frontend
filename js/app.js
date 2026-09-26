@@ -292,9 +292,18 @@ async function afterLogin() {
   const roleName = roleLabel(state.user.role);
   const displayName = state.user.full_name || state.user.username || 'Foydalanuvchi';
 
+  // Store foydalanuvchisi uchun ulangan nonvoyxonalar nomlarini ko'rsatish
+  let chipSubtitle = roleName;
+  if (state.user.role === 'store') {
+    const bizNames = Array.isArray(state.user.businesses) && state.user.businesses.length
+      ? state.user.businesses.map(b => b.name).join(', ')
+      : '';
+    if (bizNames) chipSubtitle = bizNames;
+  }
+
   const userChip = document.getElementById('user-chip');
   if (userChip) {
-    userChip.textContent = `${displayName} · ${roleName}`;
+    userChip.textContent = `${displayName} · ${chipSubtitle}`;
   }
 
   // Sidebar foydalanuvchi ma'lumotlarini yangilash
@@ -302,7 +311,7 @@ async function afterLogin() {
   const userRoleEl = document.getElementById('sidebar-user-role');
   const userAvatarEl = document.getElementById('sidebar-user-avatar');
   if (userNameEl) userNameEl.textContent = displayName;
-  if (userRoleEl) userRoleEl.textContent = roleName;
+  if (userRoleEl) userRoleEl.textContent = chipSubtitle;
   if (userAvatarEl) {
     const initials = displayName
       .split(' ')
@@ -316,8 +325,24 @@ async function afterLogin() {
   if (state.user.role === 'super_admin') {
     const bRes = await API.get('/businesses?limit=100');
     state.businesses = Array.isArray(bRes) ? bRes : (bRes?.data || []);
+  } else if (state.user.role === 'bakery_admin') {
+    // bakery_admin uchun ham businesses list kerak bo'lishi mumkin (store form uchun)
+    state.currentBusinessId = state.user.business_id;
+    try {
+      const bRes = await API.get('/businesses?limit=100');
+      state.businesses = Array.isArray(bRes) ? bRes : (bRes?.data || []);
+    } catch (_) {
+      state.businesses = state.user.business_id
+        ? [{ id: state.user.business_id, name: state.user.business_name || `Nonvoyxona #${state.user.business_id}` }]
+        : [];
+    }
   } else {
     state.currentBusinessId = state.user.business_id;
+    // Store user uchun businesses ma'lumotini state.user ichida saqlash (login javobidan keladi)
+    if (!state.user.businesses && Array.isArray(state.user.business_ids)) {
+      state.user.businesses = state.user.business_ids.map(id => ({ id, name: `Nonvoyxona #${id}` }));
+    }
+    state.businesses = [];
   }
 
   initNotificationCenter();
@@ -326,6 +351,7 @@ async function afterLogin() {
   state.route = location.hash && location.hash !== '#/' ? location.hash : '#/dashboard';
   render();
 }
+
 
 function isDeliveryUser() {
   return state.user?.role === 'delivery' || state.user?.role === 'dostavkachi';
