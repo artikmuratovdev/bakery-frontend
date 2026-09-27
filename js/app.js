@@ -452,12 +452,14 @@ const NAV_ITEMS = {
   delivery: [
     { group: 'Yetkazib berish', items: [
       { href: '#/dashboard', label: 'Tasdiqlangan zakazlar', icon: '<i class="fa-solid fa-truck-fast"></i>' },
+      { href: '#/distribution', label: 'Do‘konlarga taqsimlash', icon: '<i class="fa-solid fa-boxes-stacked"></i>' },
       { href: '#/delivery/history', label: 'Yetkazilganlar', icon: '<i class="fa-solid fa-clock-rotate-left"></i>' }
     ]}
   ],
   dostavkachi: [
     { group: 'Yetkazib berish', items: [
       { href: '#/dashboard', label: 'Tasdiqlangan zakazlar', icon: '<i class="fa-solid fa-truck-fast"></i>' },
+      { href: '#/distribution', label: 'Do‘konlarga taqsimlash', icon: '<i class="fa-solid fa-boxes-stacked"></i>' },
       { href: '#/delivery/history', label: 'Yetkazilganlar', icon: '<i class="fa-solid fa-clock-rotate-left"></i>' }
     ]}
   ]
@@ -510,7 +512,7 @@ async function render(isRevalidating = false) {
 
   // Ruxsatlar (Role guards)
   if (isDeliveryUser()) {
-    if (view !== 'dashboard' && view !== 'delivery') {
+    if (view !== 'dashboard' && view !== 'delivery' && view !== 'distribution') {
       location.hash = '#/dashboard';
       return;
     }
@@ -540,7 +542,7 @@ async function render(isRevalidating = false) {
     stores: "Do‘konlar",
     orders: state.user?.role === 'store' ? 'Mening zakazlarim' : 'Do‘kon zakazlari',
     production: 'Ishlab chiqarish',
-    distribution: 'Taqsimlash',
+    distribution: isDeliveryUser() ? 'Do‘konlarga taqsimlash' : 'Taqsimlash',
     payments: 'Naqd / Nasiya hisob-kitobi',
     reports: 'Hisobotlar'
   };

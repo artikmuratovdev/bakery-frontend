@@ -1237,6 +1237,20 @@ function productionFormModal(defaultBizId) {
 
 /* ===================== DISTRIBUTION ===================== */
 async function renderDistribution(content) {
+  if (isDeliveryUser()) {
+    try {
+      const res = await API.get('/deliveries/targets');
+      const targets = Array.isArray(res) ? res : (res?.data || []);
+      if (!targets.length) {
+        content.innerHTML = `<div class="alert alert-info">Sizga taqsimlash uchun do‘kon biriktirilmagan.</div>`;
+        return;
+      }
+      await renderDistributionList(content, null, targets);
+    } catch (err) {
+      content.innerHTML = `<div class="alert alert-warning">Do‘konlarni yuklab bo‘lmadi: ${escapeHtml(err.message || 'Server xatosi')}</div>`;
+    }
+    return;
+  }
   if (state.user.role === 'bakery_admin') {
     location.hash = '#/dashboard';
     return;
@@ -1250,7 +1264,7 @@ async function renderDistribution(content) {
   await renderDistributionList(content, bizId);
 }
 
-async function renderDistributionList(content, bizId) {
+async function renderDistributionList(content, bizId, driverTargets = null) {
   let page = 1;
   const limit = 10;
   let filterDate = state.distFilterDate || '';
@@ -1263,14 +1277,14 @@ async function renderDistributionList(content, bizId) {
       content.innerHTML = `
         <div class="section-head">
           <h2>Do'konlarga taqsimlash</h2>
-          <p>Tayyorlangan nonlarni do'konlarga bering va to'lov turini belgilang</p>
+          <p>${driverTargets ? 'Do‘kon tanlab yangi taqsimot yozing yoki avvalgi yozuvlarni ko‘ring' : "Tayyorlangan nonlarni do'konlarga bering va to'lov turini belgilang"}</p>
         </div>
 
         <div class="filters-bar">
           <div class="field"><label>Sana bo'yicha filtr</label><input type="date" id="filter-date" value="${filterDate}" /></div>
           <button class="btn btn-secondary btn-sm" id="clear-filter">Tozalash</button>
           <div style="margin-left:auto;">
-            <button class="btn btn-primary" id="add-dist-btn">+ Taqsimlash kiritish</button>
+            <button class="btn btn-primary" id="add-dist-btn">+ Yangi taqsimlash</button>
           </div>
         </div>
 
@@ -1289,7 +1303,7 @@ async function renderDistributionList(content, bizId) {
                   <td class="text-right num"><strong>${fmtMoney(e.total_amount)}</strong></td>
                   <td class="text-right num">${fmtMoney(e.cash_amount)}</td>
                   <td class="text-right num">${fmtMoney(e.credit_amount)}</td>
-                  <td><button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button></td>
+                  <td>${driverTargets ? '' : `<button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>`}</td>
                 </tr>
               `).join('') : `<tr class="empty-row"><td colspan="9">Yozuv topilmadi</td></tr>`}
             </tbody>
@@ -1316,7 +1330,7 @@ async function renderDistributionList(content, bizId) {
         loadData();
       };
       const addBtn = content.querySelector('#add-dist-btn');
-      if (addBtn) addBtn.onclick = () => distributionFormModal(bizId);
+      if (addBtn) addBtn.onclick = () => distributionFormModal(bizId, driverTargets);
       content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
         confirmAction("Bu yozuvni o'chirmoqchimisiz?", async () => {
           try { await API.del('/distribution/' + b.dataset.del); toast("O'chirildi", 'success'); loadData(); }
@@ -1335,13 +1349,14 @@ async function renderDistributionList(content, bizId) {
   await loadData();
 }
 
-function distributionFormModal(defaultBizId) {
-  const needsBizSelect = state.user.role === 'super_admin';
-  const initialBiz = defaultBizId || effectiveBizId() || state.businesses[0]?.id;
+function distributionFormModal(defaultBizId, driverTargets = null) {
+  const isDriver = isDeliveryUser();
+  const needsBizSelect = state.user.role === 'super_admin' || (isDriver && driverTargets.length > 1);
+  const initialBiz = defaultBizId || effectiveBizId() || (isDriver ? driverTargets[0]?.id : state.businesses[0]?.id);
   openModal("Yangi taqsimlash yozuvi", `
     <form id="dist-form">
       <div class="form-grid">
-        ${needsBizSelect ? `<div class="field span-2"><label>Nonvoyxona</label>${bizSelectHtml('f-biz', initialBiz)}</div>` : ''}
+        ${needsBizSelect ? `<div class="field span-2"><label>Nonvoyxona</label>${isDriver ? `<select id="f-biz">${driverTargets.map(b => `<option value="${b.id}" ${String(b.id) === String(initialBiz) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}</select>` : bizSelectHtml('f-biz', initialBiz)}</div>` : ''}
         <div class="field"><label>Do'kon</label><select id="f-store" required></select></div>
         <div class="field"><label>Mahsulot</label><select id="f-product" required></select></div>
         <div class="field"><label>Sana</label><input type="date" id="f-date" value="${todayStr()}" required /></div>
@@ -1373,10 +1388,10 @@ function distributionFormModal(defaultBizId) {
             console.warn("Mahsulotlarni yuklashda xatolik:", err);
             return [];
           }),
-          API.get('/stores' + qs({ business_id: bizId, limit: 100 })).catch(err => {
+          (isDriver ? Promise.resolve(driverTargets.find(b => String(b.id) === String(bizId))?.stores || []) : API.get('/stores' + qs({ business_id: bizId, limit: 100 })).catch(err => {
             console.warn("Do'konlarni yuklashda xatolik:", err);
             return [];
-          }),
+          })),
           (bizId ? API.get('/production/stock' + qs({ business_id: bizId, limit: 100 })) : Promise.resolve([])).catch(err => {
             console.warn("Zaxira (stock) yuklashda xatolik:", err);
             return [];
@@ -1410,7 +1425,7 @@ function distributionFormModal(defaultBizId) {
     }
 
     function updateStockHint() {
-      const bizId = needsBizSelect ? m.querySelector('#f-biz')?.value : effectiveBizId();
+      const bizId = needsBizSelect ? m.querySelector('#f-biz')?.value : (isDriver ? driverTargets[0]?.id : effectiveBizId());
       const productId = m.querySelector('#f-product')?.value;
       const hintEl = m.querySelector('#f-stock-hint');
       if (!hintEl) return;
@@ -1420,6 +1435,7 @@ function distributionFormModal(defaultBizId) {
       }
       const s = stock.find(x => (x.product?.id || x.product_id || x.id) == productId);
       hintEl.textContent = s ? `Nonvoyxonada mavjud zaxira: ${fmtNum(s.remaining)} dona` : '';
+      m.querySelector('#f-qty').max = s ? Math.max(0, Number(s.remaining) || 0) : '';
     }
 
     function updateTotal() {
@@ -1495,7 +1511,7 @@ function distributionFormModal(defaultBizId) {
         cash_amount: cash,
         credit_amount: credit
       };
-      if (needsBizSelect) body.business_id = m.querySelector('#f-biz').value;
+      if (isDriver || needsBizSelect) body.business_id = isDriver ? (needsBizSelect ? m.querySelector('#f-biz').value : driverTargets[0].id) : m.querySelector('#f-biz').value;
 
       await withButtonLoading(submitBtn, async () => {
         await API.post('/distribution', body);
@@ -1747,6 +1763,12 @@ async function renderDailyReport(content) {
       <div class="card-header"><h3>Do'konlarga taqsimlash — ${fmtDate(date)}</h3></div>
       ${renderDistTable(data.distribution, true)}
     </div>
+    ${data.externalDeliveries?.length ? `
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header"><h3>Ro'yxatdan tashqari yetkazishlar — ${fmtDate(date)}</h3></div>
+        ${renderDistTable(data.externalDeliveries.map(d => ({ ...d, store_name: d.store_name || d.recipient_name || d.address || 'Tashqi do‘kon' })), true)}
+      </div>
+    ` : ''}
     ` : ''}
   `;
 
@@ -2653,6 +2675,12 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     const historyBadge = counts.completed !== null ? counts.completed : (activeTab === 'history' ? currentPagination.total : '');
 
     content.innerHTML = `
+      ${location.hash === '#/distribution' ? `
+        <div class="section-head">
+          <h2>Do‘konlarga taqsimlash</h2>
+          <p>Tasdiqlangan zakazdan mahsulot miqdori va to‘lovni kiriting. Yetkazishni tasdiqlaganingizda taqsimot avtomatik qayd etiladi.</p>
+        </div>
+      ` : ''}
       <!-- Quick Summary Stat Cards -->
       <div class="grid grid-3" style="margin-bottom:20px;">
         ${statCard('<i class="fa-solid fa-truck-ramp-box"></i>', activeTab === 'active' ? 'Tasdiqlangan zakazlar' : 'Yetkazilgan zakazlar', fmtNum(currentPagination.total) + ' ta', '', activeTab === 'active' ? 'blue' : 'green')}
@@ -3101,7 +3129,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                       <div class="delivery-form-grid">
                         <div class="delivery-form-field">
                           <label>Berilgan miqdor</label>
-                          <input type="number" class="delivery-qty-input" min="1" max="${stats.remaining}" value="${stats.remaining}" step="1" required placeholder="Miqdor" />
+                    <input type="number" class="delivery-qty-input" min="${stats.remaining}" max="${stats.remaining}" value="${stats.remaining}" step="1" required readonly aria-label="Zakazdagi to'liq miqdor" />
                         </div>
 
                         <div class="delivery-form-field">
@@ -3142,7 +3170,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
   // 25 soniyali polling boshlash
   stopDeliveryPolling();
   deliveryPollTimer = setInterval(() => {
-    if (isDeliveryUser() && (location.hash === '#/dashboard' || location.hash.startsWith('#/delivery'))) {
+    if (isDeliveryUser() && (location.hash === '#/dashboard' || location.hash === '#/distribution' || location.hash.startsWith('#/delivery'))) {
       loadData(true);
     } else {
       stopDeliveryPolling();
