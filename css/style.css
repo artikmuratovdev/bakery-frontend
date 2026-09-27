@@ -2317,6 +2317,20 @@ textarea {
   min-width: 90px;
 }
 
+.order-item-row .field-price {
+  flex: 1.2;
+  min-width: 110px;
+}
+
+@media (max-width: 520px) {
+  .order-item-row {
+    flex-wrap: wrap;
+  }
+  .order-item-row .field-prod {
+    flex-basis: 100%;
+  }
+}
+
 .order-item-row .field-remove {
   flex-shrink: 0;
   margin-bottom: 1px;

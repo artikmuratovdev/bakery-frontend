@@ -607,7 +607,7 @@ async function renderProducts(content) {
 
   async function loadData() {
     try {
-      const res = await API.get('/products' + qs({ business_id: bizId, page, limit }));
+      const res = await API.get('/products' + qs({ business_id: bizId, all: 1, page, limit }));
       const { items: list, pagination } = extractListData(res, page, limit);
 
       content.innerHTML = `
@@ -621,13 +621,13 @@ async function renderProducts(content) {
             <button class="btn btn-primary btn-sm" id="add-product-btn">+ Yangi mahsulot</button>
           </div>
           <div class="table-wrap"><table>
-            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th class="text-right">Narxi</th><th>Holati</th><th></th></tr></thead>
+            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Nomi</th><th class="text-right">Narxlari</th><th>Holati</th><th></th></tr></thead>
             <tbody>
               ${list.map(p => `
                 <tr>
                   ${!bizId ? `<td class="muted">${escapeHtml(bizName(p.business_id))}</td>` : ''}
                   <td><strong>${escapeHtml(p.name)}</strong></td>
-                  <td class="text-right num">${fmtMoney(p.price)}</td>
+                  <td class="text-right num">${productPrices(p).map((price, i) => i === 0 ? `<strong>${fmtMoney(price)}</strong>` : fmtMoney(price)).join('<br>')}</td>
                   <td>${p.active ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-red">Nofaol</span>'}</td>
                   <td><div class="row-actions">
                     <button class="icon-btn" data-edit="${p.id}" title="Tahrirlash"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -651,8 +651,8 @@ async function renderProducts(content) {
       content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
         confirmAction("Bu mahsulot turini o'chirmoqchimisiz?", async () => {
           try {
-            await API.del('/products/' + b.dataset.del);
-            toast("O'chirildi", 'success');
+            const res = await API.del('/products/' + b.dataset.del);
+            toast(res?.deactivated ? res.message : "O'chirildi", 'success');
             render();
           } catch (err) { toast(err.message, 'error'); }
         });
@@ -676,7 +676,13 @@ function productFormModal(product, defaultBizId) {
       <div class="form-grid">
         ${needsBizSelect ? `<div class="field span-2"><label>Nonvoyxona</label>${bizSelectHtml('f-biz', product?.business_id || defaultBizId || state.businesses[0]?.id)}</div>` : ''}
         <div class="field span-2"><label>Mahsulot nomi</label><input required id="f-name" value="${escapeHtml(product?.name || '')}" placeholder="Masalan: 8000 so'mlik non" /></div>
-        <div class="field span-2"><label>Narxi (so'm)</label><input required type="number" min="0" step="100" id="f-price" value="${product?.price ?? ''}" placeholder="Masalan: 8000" /></div>
+        <div class="field span-2">
+          <label>Narxlari (so'm) <span class="muted" style="font-weight:400;">— birinchisi asosiy narx</span></label>
+          <div id="f-prices"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="f-add-price" style="margin-top:8px;">
+            <i class="fa-solid fa-plus"></i> Narx qo'shish
+          </button>
+        </div>
         ${product ? `
           <div class="field span-2">
             <label>Holati (Status)</label>
@@ -693,13 +699,51 @@ function productFormModal(product, defaultBizId) {
       </div>
     </form>
   `, (m) => {
+    const pricesBox = m.querySelector('#f-prices');
+    function addPriceRow(value = '') {
+      const row = document.createElement('div');
+      row.className = 'price-row';
+      row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-top:6px;';
+      row.innerHTML = `
+        <input type="number" class="f-price-input" min="0" step="100" required value="${value}" placeholder="Masalan: 8000" style="flex:1;" />
+        <button type="button" class="icon-btn f-price-remove" title="Narxni olib tashlash"><i class="fa-solid fa-xmark"></i></button>
+      `;
+      row.querySelector('.f-price-remove').onclick = () => {
+        if (pricesBox.querySelectorAll('.price-row').length <= 1) {
+          toast("Kamida bitta narx bo'lishi kerak", 'warning');
+          return;
+        }
+        row.remove();
+      };
+      pricesBox.appendChild(row);
+    }
+    const initialPrices = productPrices(product);
+    (initialPrices.length ? initialPrices : ['']).forEach(price => addPriceRow(price));
+    m.querySelector('#f-add-price').onclick = () => {
+      addPriceRow();
+      pricesBox.querySelector('.price-row:last-child .f-price-input').focus();
+    };
+
     m.querySelector('#cancel-btn').onclick = () => m.remove();
     m.querySelector('#product-form').onsubmit = async (e) => {
       e.preventDefault();
       const submitBtn = m.querySelector('button[type="submit"]');
+      const prices = [...pricesBox.querySelectorAll('.f-price-input')]
+        .map(inp => inp.value.trim())
+        .filter(v => v !== '')
+        .map(Number);
+      if (!prices.length || prices.some(p => !Number.isFinite(p) || p < 0)) {
+        toast("Narxlarni to'g'ri kiriting", 'warning');
+        return;
+      }
+      if (new Set(prices).size !== prices.length) {
+        toast("Bir xil narx ikki marta kiritilgan", 'warning');
+        return;
+      }
       const body = {
         name: document.getElementById('f-name').value.trim(),
-        price: Number(document.getElementById('f-price').value)
+        price: prices[0],
+        prices
       };
       if (product) {
         const activeSel = document.getElementById('f-prod-active');
@@ -1291,7 +1335,7 @@ async function renderDistributionList(content, bizId, driverTargets = null) {
         <div class="card">
           <div class="card-header"><h3>Yozuvlar (${fmtNum(pagination.total)})</h3></div>
           <div class="table-wrap"><table>
-            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Sana</th><th>Do'kon</th><th>Mahsulot</th><th class="text-right">Soni</th><th class="text-right">Jami</th><th class="text-right">Naqd</th><th class="text-right">Nasiya</th><th></th></tr></thead>
+            <thead><tr>${!bizId ? '<th>Nonvoyxona</th>' : ''}<th>Sana</th><th>Do'kon</th><th>Mahsulot</th><th class="text-right">Soni</th><th class="text-right">Narxi</th><th class="text-right">Jami</th><th class="text-right">Naqd</th><th class="text-right">Nasiya</th><th></th></tr></thead>
             <tbody>
               ${entries.length ? entries.map(e => `
                 <tr>
@@ -1300,12 +1344,13 @@ async function renderDistributionList(content, bizId, driverTargets = null) {
                   <td>${escapeHtml(e.store_name)}</td>
                   <td>${escapeHtml(e.product_name)}</td>
                   <td class="text-right num">${fmtNum(e.quantity)}</td>
+                  <td class="text-right num">${fmtMoney(e.unit_price)}</td>
                   <td class="text-right num"><strong>${fmtMoney(e.total_amount)}</strong></td>
                   <td class="text-right num">${fmtMoney(e.cash_amount)}</td>
                   <td class="text-right num">${fmtMoney(e.credit_amount)}</td>
                   <td>${driverTargets ? '' : `<button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>`}</td>
                 </tr>
-              `).join('') : `<tr class="empty-row"><td colspan="9">Yozuv topilmadi</td></tr>`}
+              `).join('') : `<tr class="empty-row"><td colspan="10">Yozuv topilmadi</td></tr>`}
             </tbody>
           </table></div>
           ${renderPaginationHtml(pagination, 'dist-pg')}
@@ -1359,8 +1404,9 @@ function distributionFormModal(defaultBizId, driverTargets = null) {
         ${needsBizSelect ? `<div class="field span-2"><label>Nonvoyxona</label>${isDriver ? `<select id="f-biz">${driverTargets.map(b => `<option value="${b.id}" ${String(b.id) === String(initialBiz) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}</select>` : bizSelectHtml('f-biz', initialBiz)}</div>` : ''}
         <div class="field"><label>Do'kon</label><select id="f-store" required></select></div>
         <div class="field"><label>Mahsulot</label><select id="f-product" required></select></div>
+        <div class="field"><label>Narxi</label><select id="f-unit-price" required></select></div>
         <div class="field"><label>Sana</label><input type="date" id="f-date" value="${todayStr()}" required /></div>
-        <div class="field"><label>Berilgan soni</label><input type="number" min="1" step="1" id="f-qty" placeholder="Masalan: 200" required /></div>
+        <div class="field span-2"><label>Berilgan soni</label><input type="number" min="1" step="1" id="f-qty" placeholder="Masalan: 200" required /></div>
         <div class="field span-2"><div id="f-stock-hint" class="field-hint"></div></div>
         <div class="field span-2"><label>To'lov turi</label>
           <select id="f-pay-type">
@@ -1416,8 +1462,9 @@ function distributionFormModal(defaultBizId, driverTargets = null) {
         const storeList = extractItems(stores, 'stores');
         stock = extractItems(loadedStock, 'stock');
 
-        m.querySelector('#f-product').innerHTML = products.map(p => `<option value="${p.id}" data-price="${p.price}">${escapeHtml(p.name)} — ${fmtMoney(p.price)}</option>`).join('') || `<option value="">Mahsulot yo'q</option>`;
+        m.querySelector('#f-product').innerHTML = products.map(p => `<option value="${p.id}">${escapeHtml(p.name)}${productPrices(p).length > 1 ? ` (${productPrices(p).length} xil narx)` : ` — ${fmtMoney(p.price)}`}</option>`).join('') || `<option value="">Mahsulot yo'q</option>`;
         m.querySelector('#f-store').innerHTML = storeList.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('') || `<option value="">Do'kon yo'q</option>`;
+        updatePriceOptions();
         updateStockHint();
         updateTotal();
       } catch (err) {
@@ -1439,10 +1486,15 @@ function distributionFormModal(defaultBizId, driverTargets = null) {
       m.querySelector('#f-qty').max = s ? Math.max(0, Number(s.remaining) || 0) : '';
     }
 
+    function updatePriceOptions() {
+      const product = products.find(p => String(p.id) === String(m.querySelector('#f-product').value));
+      const priceSel = m.querySelector('#f-unit-price');
+      priceSel.innerHTML = product ? priceOptionsHtml(product, product.price) : `<option value="">—</option>`;
+      priceSel.disabled = !product || productPrices(product).length <= 1;
+    }
+
     function updateTotal() {
-      const sel = m.querySelector('#f-product');
-      const opt = sel.options[sel.selectedIndex];
-      const price = opt ? Number(opt.dataset.price || 0) : 0;
+      const price = Number(m.querySelector('#f-unit-price').value || 0);
       const qty = Number(m.querySelector('#f-qty').value || 0);
       currentTotal = price * qty;
       m.querySelector('#f-total').textContent = price ? `Jami summa: ${fmtMoney(currentTotal)}` : '';
@@ -1491,7 +1543,8 @@ function distributionFormModal(defaultBizId, driverTargets = null) {
 
     await loadForBiz(initialBiz);
     if (needsBizSelect) m.querySelector('#f-biz').addEventListener('change', (e) => loadForBiz(e.target.value));
-    m.querySelector('#f-product').addEventListener('change', () => { updateTotal(); updateStockHint(); });
+    m.querySelector('#f-product').addEventListener('change', () => { updatePriceOptions(); updateTotal(); updateStockHint(); });
+    m.querySelector('#f-unit-price').addEventListener('change', updateTotal);
     m.querySelector('#f-qty').addEventListener('input', updateTotal);
     m.querySelector('#f-pay-type').addEventListener('change', syncPaymentFields);
     m.querySelector('#f-cash').addEventListener('input', onCashInput);
@@ -1507,6 +1560,7 @@ function distributionFormModal(defaultBizId, driverTargets = null) {
       const body = {
         store_id: m.querySelector('#f-store').value,
         product_id: m.querySelector('#f-product').value,
+        unit_price: Number(m.querySelector('#f-unit-price').value),
         date: m.querySelector('#f-date').value,
         quantity: Number(m.querySelector('#f-qty').value),
         cash_amount: cash,
@@ -1874,7 +1928,9 @@ function formatOrderItemsSummary(items) {
   return items.map(it => {
     const name = it.product?.name || it.product_name || it.name || ('Mahsulot #' + it.product_id);
     const qty = it.quantity || it.qty || 0;
-    return `${escapeHtml(name)} (${fmtNum(qty)} dona)`;
+    // Bir nechta narxli mahsulotda qaysi narxdagi non ekanini ko'rsatamiz
+    const showPrice = it.unit_price != null && (productPrices(it.product).length > 1 || Number(it.unit_price) !== Number(it.product?.price));
+    return `${escapeHtml(name)} (${fmtNum(qty)} dona${showPrice ? ` × ${fmtMoney(it.unit_price)}` : ''})`;
   }).join(', ');
 }
 
@@ -2003,7 +2059,7 @@ async function renderOrders(content) {
                       <td class="muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(o.note || '')}">
                         ${escapeHtml(o.note || '—')}
                       </td>
-                      <td>${orderStatusBadge(o.status)}</td>
+                      <td>${orderStatusBadge(o.status)}${o.source === 'driver' ? ` <span class="badge badge-gray" title="Haydovchi qo'lda kiritgan taqsimot"><i class="fa-solid fa-truck"></i> Haydovchi</span>` : ''}</td>
                       <td style="text-align:right; white-space:nowrap;">
                         <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end;">
                           ${isSuperAdmin ? `
@@ -2232,10 +2288,14 @@ async function orderCreateModal(onSuccess) {
             <option value="">-- Mahsulotni tanlang --</option>
             ${curProducts.map(p => `
               <option value="${p.id}" ${String(p.id) === String(selectedProdId) ? 'selected' : ''}>
-                ${escapeHtml(p.name)} ${p.price ? `(${fmtMoney(p.price)})` : ''}
+                ${escapeHtml(p.name)}
               </option>
             `).join('')}
           </select>
+        </div>
+        <div class="field field-price">
+          <label>Narxi</label>
+          <select class="item-price-select" required><option value="">—</option></select>
         </div>
         <div class="field field-qty">
           <label>Miqdor (dona)</label>
@@ -2247,6 +2307,16 @@ async function orderCreateModal(onSuccess) {
           </button>
         </div>
       `;
+
+      const prodSel = row.querySelector('.item-product-select');
+      const priceSel = row.querySelector('.item-price-select');
+      const syncPrices = () => {
+        const product = curProducts.find(p => String(p.id) === String(prodSel.value));
+        priceSel.innerHTML = product ? priceOptionsHtml(product, product.price) : `<option value="">—</option>`;
+        priceSel.disabled = !product || productPrices(product).length <= 1;
+      };
+      prodSel.addEventListener('change', syncPrices);
+      syncPrices();
 
       row.querySelector('.remove-row-btn').onclick = () => {
         if (rowsContainer.querySelectorAll('.order-item-row').length <= 1) {
@@ -2330,6 +2400,7 @@ async function orderCreateModal(onSuccess) {
         const prodSelect = r.querySelector('.item-product-select');
         const qtyInput = r.querySelector('.item-qty-input');
         const prodId = Number(prodSelect.value);
+        const unitPrice = Number(r.querySelector('.item-price-select').value);
         const qty = parseInt(qtyInput.value, 10);
 
         if (!prodId) {
@@ -2346,15 +2417,16 @@ async function orderCreateModal(onSuccess) {
           return;
         }
 
-        if (selectedProductIds.has(prodId)) {
-          errorEl.textContent = "Bir xil mahsulotni zakazga ikki marta qo'shish mumkin emas";
+        const itemKey = `${prodId}:${unitPrice}`;
+        if (selectedProductIds.has(itemKey)) {
+          errorEl.textContent = "Bir xil mahsulotni bir xil narxda zakazga ikki marta qo'shish mumkin emas";
           errorEl.classList.remove('hidden');
           prodSelect.focus();
           return;
         }
 
-        selectedProductIds.add(prodId);
-        items.push({ product_id: prodId, quantity: qty });
+        selectedProductIds.add(itemKey);
+        items.push({ product_id: prodId, unit_price: unitPrice, quantity: qty });
       }
 
       const note = m.querySelector('#f-order-note').value.trim();
@@ -2384,7 +2456,7 @@ function orderDetailModal(order, onUpdate) {
   let totalAmount = 0;
   items.forEach(it => {
     const qty = it.quantity || it.qty || 0;
-    const price = it.product?.price || it.price || 0;
+    const price = Number(it.unit_price ?? it.product?.price ?? it.price) || 0;
     totalAmount += qty * price;
   });
 
@@ -2422,7 +2494,7 @@ function orderDetailModal(order, onUpdate) {
           ${items.length ? items.map(it => {
             const name = it.product?.name || it.product_name || it.name || ('Mahsulot #' + it.product_id);
             const qty = it.quantity || it.qty || 0;
-            const price = it.product?.price || it.price || 0;
+            const price = Number(it.unit_price ?? it.product?.price ?? it.price) || 0;
             const sum = qty * price;
             return `
               <tr>
@@ -2847,7 +2919,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         }
         const qty = parseInt(qtyInput.value, 10) || 0;
         const total = Math.max(0, qty * unitPrice);
-        totalInput.value = fmtMoney(total) + " so‘m";
+        totalInput.value = fmtMoney(total);
         totalInput.dataset.rawTotal = total;
 
         const currentCash = parseFloat(cashInput.value) || 0;
@@ -2949,7 +3021,8 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     // "Ro'yxatda bo'lmagan do'kon" tugmasi handler
     const extDeliveryBtn = content.querySelector('#open-ext-delivery-btn');
     if (extDeliveryBtn) {
-      extDeliveryBtn.onclick = () => externalDeliveryModal(loadExtDeliveriesSection);
+      // Saqlangandan keyin joriy tab (tarix yoki tashqi ro'yxat) qayta yuklanadi
+      extDeliveryBtn.onclick = () => externalDeliveryModal(() => loadData());
     }
 
     // Tashqi yetkazishlar alohida tabda ko'rsatiladi.
@@ -2976,7 +3049,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         <div class="card ext-deliveries-today-card" style="margin-top:20px;">
           <div class="card-header" style="display:flex; align-items:center; gap:10px;">
             <i class="fa-solid fa-box-open" style="color:var(--color-green); font-size:16px;"></i>
-            <h3 style="margin:0;">Ro'yxatdan tashqari yetkazilganlar</h3>
+            <h3 style="margin:0;">Bugun ro'yxatdan tashqari yetkazilganlar</h3>
             <span class="badge badge-green" style="margin-left:auto;">${list.length} ta</span>
           </div>
           <div class="table-wrap">
@@ -2986,6 +3059,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                   <th>Do'kon / Mijoz</th>
                   <th>Mahsulot</th>
                   <th class="text-right">Miqdor</th>
+                  <th class="text-right">Narxi</th>
                   <th class="text-right">Naqd</th>
                   <th class="text-right">Nasiya</th>
                   <th>Vaqt</th>
@@ -3001,6 +3075,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                       <td><strong>${escapeHtml(d.store_name || d.client_name || '—')}</strong></td>
                       <td>${escapeHtml(productName)}</td>
                       <td class="text-right num"><strong>${qty} dona</strong></td>
+                      <td class="text-right num">${fmtMoney(d.unit_price)}</td>
                       <td class="text-right num">${fmtMoney(d.cash_amount)}</td>
                       <td class="text-right num">${fmtMoney(d.credit_amount)}</td>
                       <td class="muted" style="white-space:nowrap;">${time}</td>
@@ -3025,7 +3100,15 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     const createdDate = formatDateTime(order.created_at || order.createdAt);
     const items = order.items || order.order_items || order.OrderItems || [];
     const isOrderDone = order.status === 'completed';
-    const isDistributionEntry = typeof order.id === 'string' && order.id.startsWith('distribution-');
+    const idStr = String(order.id);
+    const source = order.source || (idStr.startsWith('distribution-') ? 'distribution' : idStr.startsWith('external-') ? 'external' : 'order');
+    const sourceTag = {
+      order: { icon: 'fa-receipt', label: 'Zakaz', num: idStr },
+      driver: { icon: 'fa-truck', label: 'Qo‘lda kiritilgan', num: idStr },
+      distribution: { icon: 'fa-boxes-stacked', label: 'Taqsimot', num: idStr.replace('distribution-', '') },
+      external: { icon: 'fa-map-location-dot', label: 'Ro‘yxatdan tashqari', num: idStr.replace('external-', '') }
+    }[source] || { icon: 'fa-receipt', label: 'Zakaz', num: idStr };
+    const deliveredBy = items.map(it => it.delivery?.delivery_user?.full_name || it.delivery?.delivery_user?.username).find(Boolean);
 
     let statusBadge = '';
     if (order.status === 'completed') {
@@ -3041,9 +3124,10 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         <div class="delivery-card-top">
           <div class="delivery-card-title">
             <span class="delivery-order-tag">
-              <i class="fa-solid ${isDistributionEntry ? 'fa-boxes-stacked' : 'fa-receipt'}"></i> ${isDistributionEntry ? 'Distribution' : 'Zakaz'} #${isDistributionEntry ? order.id.slice('distribution-'.length) : order.id}
+              <i class="fa-solid ${sourceTag.icon}"></i> ${sourceTag.label} #${escapeHtml(sourceTag.num)}
             </span>
             ${statusBadge}
+            ${order.business?.name ? `<span class="badge badge-gray">${escapeHtml(order.business.name)}</span>` : ''}
           </div>
           <div class="muted" style="font-size:var(--text-xs); display:flex; align-items:center; gap:5px;">
             <i class="fa-regular fa-clock"></i> ${createdDate}
@@ -3072,7 +3156,12 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         ${order.note ? `
           <div class="delivery-note-box">
             <i class="fa-solid fa-comment-dots" style="color:var(--color-primary); margin-top:2px;"></i>
-            <div><strong>Do‘kon izohi:</strong> ${escapeHtml(order.note)}</div>
+            <div><strong>${source === 'order' ? 'Do‘kon izohi' : 'Izoh'}:</strong> ${escapeHtml(order.note)}</div>
+          </div>
+        ` : ''}
+        ${deliveredBy && isOrderDone ? `
+          <div class="muted" style="font-size:var(--text-xs); margin:-4px 0 8px 0;">
+            <i class="fa-solid fa-user"></i> Yetkazgan: ${escapeHtml(deliveredBy)}
           </div>
         ` : ''}
 
@@ -3095,7 +3184,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                   <div class="delivery-item-name">
                     <i class="fa-solid fa-bread-slice" style="color:var(--color-primary); margin-right:6px;"></i>
                     ${escapeHtml(prodName)}
-                    ${unitPrice > 0 ? `<span style="font-size:12px; color:var(--color-text-muted); font-weight:normal; margin-left:6px;">(${fmtMoney(unitPrice)} so‘m/dona)</span>` : ''}
+                    ${unitPrice > 0 ? `<span style="font-size:12px; color:var(--color-text-muted); font-weight:normal; margin-left:6px;">(${fmtMoney(unitPrice)}/dona)</span>` : ''}
                   </div>
                   <div class="delivery-item-stats">
                     <span>Zakaz: <strong>${fmtNum(stats.ordered)} dona</strong></span>
@@ -3118,14 +3207,14 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                     ${item.distribution ? `
                       <div class="muted" style="font-size:var(--text-xs); margin-top:6px;">
                         <i class="fa-solid fa-boxes-stacked" style="color:var(--color-primary);"></i>
-                        Distributionga qo‘shildi: ${fmtNum(item.distribution.quantity)} dona · ${formatDateTime(item.distribution.date)}
+                        Taqsimotga qo‘shildi: ${fmtNum(item.distribution.quantity)} dona · ${fmtDate(item.distribution.date)}
                       </div>
                     ` : ''}
 
                     <div class="delivery-finance-chips">
-                      <span class="chip-cash" title="Naqd summa"><i class="fa-solid fa-money-bill-wave"></i> Naqd: <strong>${fmtMoney(stats.cashAmount || 0)} so‘m</strong></span>
-                      <span class="chip-credit" title="Nasiya summa"><i class="fa-solid fa-file-invoice-dollar"></i> Nasiya: <strong>${fmtMoney(stats.creditAmount != null ? stats.creditAmount : Math.max(0, (stats.delivered || stats.ordered) * unitPrice - (stats.cashAmount || 0)))} so‘m</strong></span>
-                      <span class="chip-total" title="Jami summa"><i class="fa-solid fa-calculator"></i> Jami: <strong>${fmtMoney((stats.delivered || stats.ordered) * unitPrice)} so‘m</strong></span>
+                      <span class="chip-cash" title="Naqd summa"><i class="fa-solid fa-money-bill-wave"></i> Naqd: <strong>${fmtMoney(stats.cashAmount || 0)}</strong></span>
+                      <span class="chip-credit" title="Nasiya summa"><i class="fa-solid fa-file-invoice-dollar"></i> Nasiya: <strong>${fmtMoney(stats.creditAmount != null ? stats.creditAmount : Math.max(0, (stats.delivered || stats.ordered) * unitPrice - (stats.cashAmount || 0)))}</strong></span>
+                      <span class="chip-total" title="Jami summa"><i class="fa-solid fa-calculator"></i> Jami: <strong>${fmtMoney((stats.delivered || stats.ordered) * unitPrice)}</strong></span>
                     </div>
                   </div>
                 ` : `
@@ -3139,7 +3228,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
 
                         <div class="delivery-form-field">
                           <label>Jami summa</label>
-                          <input type="text" class="delivery-total-input" readonly value="${fmtMoney(initialTotal)} so‘m" data-raw-total="${initialTotal}" title="quantity × unit_price" />
+                          <input type="text" class="delivery-total-input" readonly value="${fmtMoney(initialTotal)}" data-raw-total="${initialTotal}" title="quantity × unit_price" />
                         </div>
 
                         <div class="delivery-form-field">
@@ -3187,14 +3276,16 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
 async function externalDeliveryModal(onSuccess) {
   // Mahsulotlarni yuklash
   let products = [];
+  let bizNames = {};
   try {
-    const bizId = state.user?.business_id || effectiveBizId?.() || '';
-    const pRes = await API.get('/products' + qs({ business_id: bizId || undefined, limit: 100 }));
+    // Haydovchiga biriktirilgan barcha nonvoyxonalar mahsulotlari keladi
+    const [pRes, targets] = await Promise.all([
+      API.get('/products' + qs({ limit: 100 })),
+      API.get('/deliveries/targets').catch(() => [])
+    ]);
     const all = Array.isArray(pRes) ? pRes : (pRes?.data || []);
     products = all.filter(p => p.active !== false && p.active !== 0);
-    if (!products.length) {
-      products = all; // fallback — barcha mahsulotlar
-    }
+    (Array.isArray(targets) ? targets : []).forEach(b => { bizNames[b.id] = b.name; });
   } catch (e) {
     toast("Mahsulotlar ro'yxatini yuklab bo'lmadi: " + (e.message || 'Server xatosi'), 'error');
     return;
@@ -3232,11 +3323,16 @@ async function externalDeliveryModal(onSuccess) {
           <select required id="ext-f-product">
             <option value="">-- Mahsulotni tanlang --</option>
             ${products.map(p => `
-              <option value="${p.id}" data-price="${p.price || 0}">
-                ${escapeHtml(p.name)}${p.price ? ` — ${fmtMoney(p.price)}` : ''}
+              <option value="${p.id}" data-business-id="${p.business_id}">
+                ${escapeHtml(p.name)}${new Set(products.map(x => x.business_id)).size > 1 && bizNames[p.business_id] ? ` · ${escapeHtml(bizNames[p.business_id])}` : ''}
               </option>
             `).join('')}
           </select>
+        </div>
+
+        <div class="field span-2">
+          <label>Narxi <span style="color:var(--color-danger)">*</span></label>
+          <select required id="ext-f-unit-price" disabled><option value="">—</option></select>
         </div>
 
         <div class="field">
@@ -3281,6 +3377,7 @@ async function externalDeliveryModal(onSuccess) {
     const saveBtn   = m.querySelector('#ext-save-btn');
     const errorEl   = m.querySelector('#ext-delivery-form-error');
     const prodSel   = m.querySelector('#ext-f-product');
+    const priceSel  = m.querySelector('#ext-f-unit-price');
     const qtyInp    = m.querySelector('#ext-f-qty');
     const totalInp  = m.querySelector('#ext-f-total');
     const cashInp   = m.querySelector('#ext-f-cash-amount');
@@ -3288,9 +3385,14 @@ async function externalDeliveryModal(onSuccess) {
 
     cancelBtn.onclick = () => m.remove();
 
+    function syncPriceOptions() {
+      const product = products.find(p => String(p.id) === String(prodSel.value));
+      priceSel.innerHTML = product ? priceOptionsHtml(product, product.price) : `<option value="">—</option>`;
+      priceSel.disabled = !product || productPrices(product).length <= 1;
+    }
+
     function getTotalAmount() {
-      const opt = prodSel.options[prodSel.selectedIndex];
-      const price = opt ? Number(opt.dataset.price || 0) : 0;
+      const price = Number(priceSel.value) || 0;
       const qty = parseInt(qtyInp.value, 10) || 0;
       return price > 0 && qty > 0 ? price * qty : 0;
     }
@@ -3313,7 +3415,8 @@ async function externalDeliveryModal(onSuccess) {
       }
       updatePaymentSplit();
     }
-    prodSel.addEventListener('change', updateTotal);
+    prodSel.addEventListener('change', () => { syncPriceOptions(); updateTotal(); });
+    priceSel.addEventListener('change', updateTotal);
     qtyInp.addEventListener('input', () => {
       // Oldidagi nol ni olib tashlash
       if (/^0[0-9]+/.test(qtyInp.value)) {
@@ -3364,14 +3467,15 @@ async function externalDeliveryModal(onSuccess) {
       }
 
       const selectedOpt = prodSel.options[prodSel.selectedIndex];
-      const totalAmount = (Number(selectedOpt?.dataset.price || 0) || 0) * qty;
+      const unitPrice = Number(priceSel.value) || 0;
+      const totalAmount = unitPrice * qty;
       if (cashAmount + creditAmount <= 0) {
         errorEl.textContent = "Naqd yoki nasiya summasidan kamida bittasini kiriting";
         errorEl.classList.remove('hidden');
         cashInp.focus();
         return;
       }
-      if (totalAmount > 0 && cashAmount + creditAmount !== totalAmount) {
+      if (totalAmount > 0 && Math.abs(cashAmount + creditAmount - totalAmount) > 0.01) {
         errorEl.textContent = `Naqd va nasiya summasi jami ${fmtMoney(totalAmount)} bo'lishi kerak`;
         errorEl.classList.remove('hidden');
         cashInp.focus();
@@ -3379,8 +3483,8 @@ async function externalDeliveryModal(onSuccess) {
       }
 
       // Tasdiqlash oynasi
-      const productName = selectedOpt ? selectedOpt.text.split(' —')[0].trim() : 'Mahsulot';
-      const confirmMsg = `"${productName}" — ${qty} donani "${storeName}" ga yetkazilgan deb belgilaysizmi?`;
+      const productName = selectedOpt ? selectedOpt.text.split(' · ')[0].trim() : 'Mahsulot';
+      const confirmMsg = `"${productName}" (${fmtMoney(unitPrice)}) — ${qty} donani "${storeName}" ga yetkazilgan deb belgilaysizmi?`;
 
       // Inline confirm (modal ichida)
       const confirmed = await new Promise(resolve => {
@@ -3415,6 +3519,8 @@ async function externalDeliveryModal(onSuccess) {
           store_name:  storeName,
           phone:       phone || undefined,
           product_id:  Number(productId),
+          business_id: Number(selectedOpt?.dataset.businessId) || undefined,
+          unit_price:  unitPrice,
           quantity:    qty,
           cash_amount: cashAmount,
           credit_amount: creditAmount,
@@ -3424,16 +3530,9 @@ async function externalDeliveryModal(onSuccess) {
         try {
           await API.post('/deliveries/external', body);
         } catch (apiErr) {
-          // Endpoint nomi farq qilsa alternativlarni sinab ko'ramiz
-          if (apiErr.status === 404) {
-            try {
-              await API.post('/deliveries/external', body);
-            } catch (altErr) {
-              throw altErr.status === 404 ? apiErr : altErr;
-            }
-          } else {
-            throw apiErr;
-          }
+          errorEl.textContent = apiErr.message || 'Saqlashda xatolik';
+          errorEl.classList.remove('hidden');
+          return;
         }
 
         toast("Yetkazish muvaffaqiyatli qayd etildi!", 'success');

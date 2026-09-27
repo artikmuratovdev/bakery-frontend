@@ -21,6 +21,14 @@ function toast(msg, type = '') {
   }, 4000);
 }
 
+// Formalar `withButtonLoading` ichida API xatosini ushlamaydi; server qaytargan
+// xabar (masalan, "Yetarli zaxira yo'q") foydalanuvchiga ko'rinishi shart.
+window.addEventListener('unhandledrejection', (event) => {
+  const err = event.reason;
+  if (!err || err.status === 401) return;
+  toast(err.message || 'Xatolik yuz berdi', 'error');
+});
+
 /* ===================== Theme Switcher ===================== */
 function initTheme() {
   const saved = localStorage.getItem('theme') || 'light';

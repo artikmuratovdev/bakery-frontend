@@ -1,5 +1,5 @@
-const API_BASE ="https://bakery-system-1-52h6.onrender.com/api";
-// const API_BASE ="http://localhost:5000/api";
+// const API_BASE ="https://bakery-system-1-52h6.onrender.com/api";
+const API_BASE ="http://localhost:5000/api";
 
 function parseBackendError(data, res, rawText) {
   if (data) {
@@ -511,8 +511,28 @@ function fmtNum(n) {
   return n.toLocaleString('uz-UZ');
 }
 
+// Mahalliy sana (YYYY-MM-DD). toISOString() UTC bo'yicha hisoblagani uchun
+// Toshkentda 00:00–05:00 oralig'ida kechagi sanani qaytarardi.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Mahsulotning barcha narxlari (birinchisi — asosiy narx).
+function productPrices(product) {
+  if (!product) return [];
+  const list = [product.price, ...(Array.isArray(product.prices) ? product.prices : [])]
+    .map(Number)
+    .filter(n => Number.isFinite(n) && n >= 0);
+  return list.filter((price, i) => list.indexOf(price) === i);
+}
+
+// Narx tanlash uchun <option> lar
+function priceOptionsHtml(product, selected) {
+  return productPrices(product)
+    .map(price => `<option value="${price}" ${Number(selected) === price ? 'selected' : ''}>${fmtMoney(price)}</option>`)
+    .join('');
 }
 
 function fmtDate(d) {
