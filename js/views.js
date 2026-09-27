@@ -1384,7 +1384,7 @@ function distributionFormModal(defaultBizId, driverTargets = null) {
     async function loadForBiz(bizId) {
       try {
         const [loadedProducts, stores, loadedStock] = await Promise.all([
-          API.get('/products' + qs({ business_id: bizId, limit: 100 })).catch(err => {
+          API.get('/products' + qs({ business_id: state.user.all_businesses === true ? undefined : bizId, limit: 100 })).catch(err => {
             console.warn("Mahsulotlarni yuklashda xatolik:", err);
             return [];
           }),
@@ -1412,6 +1412,7 @@ function distributionFormModal(defaultBizId, driverTargets = null) {
         };
 
         products = extractItems(loadedProducts, 'products');
+        if (state.user.all_businesses === true) products = products.filter(p => String(p.business_id) === String(bizId));
         const storeList = extractItems(stores, 'stores');
         stock = extractItems(loadedStock, 'stock');
 
@@ -2616,13 +2617,9 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       const res = await API.get(endpoint, { bypassCache: true });
       const { items, pagination } = extractListData(res, page, limit);
       
-      // Driver faqat tokenidagi business/store ruxsatlariga mos zakazlarni ko'radi.
-      ordersList = items.filter(o => {
-        if (!o || o.status !== currentStatus) return false;
-        const businessId = o.business_id ?? o.store?.business_id ?? o.store?.business?.id;
-        const storeId = o.store_id ?? o.store?.id;
-        return canAccessBusiness(businessId) && canAccessStore(businessId, storeId);
-      });
+      // Server scopes orders against current active assignments. Do not apply
+      // a second client-side filter from potentially stale login-token claims.
+      ordersList = items.filter(o => o && o.status === currentStatus);
       currentPagination = pagination;
       counts[currentStatus] = pagination.total;
       renderUI();
@@ -3028,10 +3025,11 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
     const createdDate = formatDateTime(order.created_at || order.createdAt);
     const items = order.items || order.order_items || order.OrderItems || [];
     const isOrderDone = order.status === 'completed';
+    const isDistributionEntry = typeof order.id === 'string' && order.id.startsWith('distribution-');
 
     let statusBadge = '';
     if (order.status === 'completed') {
-      statusBadge = `<span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> Bajarilgan (completed)</span>`;
+      statusBadge = `<span class="badge badge-green"><i class="fa-solid fa-circle-check"></i> completed</span>`;
     } else if (order.status === 'approved') {
       statusBadge = `<span class="badge badge-blue"><i class="fa-solid fa-truck-fast"></i> Tasdiqlangan (approved)</span>`;
     } else {
@@ -3043,7 +3041,7 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
         <div class="delivery-card-top">
           <div class="delivery-card-title">
             <span class="delivery-order-tag">
-              <i class="fa-solid fa-receipt"></i> Zakaz #${order.id}
+              <i class="fa-solid ${isDistributionEntry ? 'fa-boxes-stacked' : 'fa-receipt'}"></i> ${isDistributionEntry ? 'Distribution' : 'Zakaz'} #${isDistributionEntry ? order.id.slice('distribution-'.length) : order.id}
             </span>
             ${statusBadge}
           </div>
@@ -3116,6 +3114,13 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                       <span>Yetkazildi: <strong>${fmtNum(stats.delivered || stats.ordered)} dona</strong></span>
                       ${stats.deliveryDate ? `<small style="opacity:0.85; margin-left:6px;">(${formatDateTime(stats.deliveryDate)})</small>` : ''}
                     </div>
+
+                    ${item.distribution ? `
+                      <div class="muted" style="font-size:var(--text-xs); margin-top:6px;">
+                        <i class="fa-solid fa-boxes-stacked" style="color:var(--color-primary);"></i>
+                        Distributionga qo‘shildi: ${fmtNum(item.distribution.quantity)} dona · ${formatDateTime(item.distribution.date)}
+                      </div>
+                    ` : ''}
 
                     <div class="delivery-finance-chips">
                       <span class="chip-cash" title="Naqd summa"><i class="fa-solid fa-money-bill-wave"></i> Naqd: <strong>${fmtMoney(stats.cashAmount || 0)} so‘m</strong></span>
