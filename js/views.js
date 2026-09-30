@@ -1348,7 +1348,10 @@ async function renderDistributionList(content, bizId, driverTargets = null) {
                   <td class="text-right num"><strong>${fmtMoney(e.total_amount)}</strong></td>
                   <td class="text-right num">${fmtMoney(e.cash_amount)}</td>
                   <td class="text-right num">${fmtMoney(e.credit_amount)}</td>
-                  <td>${driverTargets ? '' : `<button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>`}</td>
+                  <td style="white-space:nowrap;">
+                    ${canEditDistributionPayment(e) ? `<button class="icon-btn" data-edit-pay="${e.id}" title="Naqd / nasiyani tahrirlash"><i class="fa-solid fa-pen"></i></button>` : ''}
+                    ${driverTargets ? '' : `<button class="icon-btn" data-del="${e.id}" title="O'chirish"><i class="fa-solid fa-trash-can"></i></button>`}
+                  </td>
                 </tr>
               `).join('') : `<tr class="empty-row"><td colspan="10">Yozuv topilmadi</td></tr>`}
             </tbody>
@@ -1376,6 +1379,10 @@ async function renderDistributionList(content, bizId, driverTargets = null) {
       };
       const addBtn = content.querySelector('#add-dist-btn');
       if (addBtn) addBtn.onclick = () => distributionFormModal(bizId, driverTargets);
+      content.querySelectorAll('[data-edit-pay]').forEach(b => b.onclick = () => {
+        const entry = entries.find(e => String(e.id) === b.dataset.editPay);
+        if (entry) distributionPaymentModal(entry, loadData);
+      });
       content.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
         confirmAction("Bu yozuvni o'chirmoqchimisiz?", async () => {
           try { await API.del('/distribution/' + b.dataset.del); toast("O'chirildi", 'success'); loadData(); }
@@ -1392,6 +1399,63 @@ async function renderDistributionList(content, bizId, driverTargets = null) {
   }
 
   await loadData();
+}
+
+// Haydovchi faqat o'zi kiritgan taqsimotning naqd/nasiyasini tahrirlaydi
+function canEditDistributionPayment(entry) {
+  if (state.user?.role === 'super_admin') return true;
+  return isDeliveryUser() && entry.created_by != null && String(entry.created_by) === String(state.user?.id);
+}
+
+function distributionPaymentModal(entry, onSaved) {
+  const total = Number(entry.total_amount) || 0;
+  openModal(`Naqd / nasiyani tahrirlash`, `
+    <form id="dist-pay-form">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Do'kon / Mahsulot</label>
+          <input disabled value="${escapeHtml(entry.store_name || '')} — ${escapeHtml(entry.product_name || '')}" />
+        </div>
+        <div class="field"><label>Soni</label><input disabled value="${fmtNum(entry.quantity)} dona" /></div>
+        <div class="field"><label>Jami summa</label><input disabled value="${fmtMoney(total)}" /></div>
+        <div class="field"><label>Naqd summa</label><input type="number" min="0" step="any" id="f-pay-cash" value="${Number(entry.cash_amount) || 0}" /></div>
+        <div class="field"><label>Nasiya summa</label><input type="number" min="0" step="any" id="f-pay-credit" value="${Number(entry.credit_amount) || 0}" /></div>
+      </div>
+      <div class="form-actions" style="margin-top:20px;">
+        <button type="button" class="btn btn-secondary" id="dist-pay-cancel">Bekor qilish</button>
+        <button type="submit" class="btn btn-primary" id="dist-pay-save"><i class="fa-solid fa-check"></i> Saqlash</button>
+      </div>
+    </form>
+  `, (m) => {
+    const cashInput = m.querySelector('#f-pay-cash');
+    const creditInput = m.querySelector('#f-pay-credit');
+    const submitBtn = m.querySelector('#dist-pay-save');
+    m.querySelector('#dist-pay-cancel').onclick = () => m.remove();
+
+    // Bittasi o'zgarsa ikkinchisi jami summagacha to'ldiriladi
+    cashInput.oninput = () => { creditInput.value = Math.max(0, total - (parseFloat(cashInput.value) || 0)); };
+    creditInput.oninput = () => { cashInput.value = Math.max(0, total - (parseFloat(creditInput.value) || 0)); };
+
+    m.querySelector('#dist-pay-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const cash = parseFloat(cashInput.value);
+      const credit = parseFloat(creditInput.value);
+      if (isNaN(cash) || cash < 0 || isNaN(credit) || credit < 0) {
+        toast("Naqd va nasiya summasi manfiy bo'lishi mumkin emas", 'warning');
+        return;
+      }
+      if (Math.abs(cash + credit - total) > 0.01) {
+        toast(`Naqd va nasiya summasi jami ${fmtMoney(total)} bo'lishi kerak`, 'warning');
+        return;
+      }
+      await withButtonLoading(submitBtn, async () => {
+        await API.patch(`/distribution/${entry.id}/payment`, { cash_amount: cash, credit_amount: credit });
+        m.remove();
+        toast("Naqd / nasiya yangilandi", 'success');
+        if (onSaved) await onSaved();
+      }, '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...');
+    };
+  });
 }
 
 function distributionFormModal(defaultBizId, driverTargets = null) {
@@ -3018,6 +3082,20 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
       };
     });
 
+    // Yetkazilgan mahsulotning naqd/nasiyasini tahrirlash
+    content.querySelectorAll('.delivery-edit-pay-btn').forEach(btn => {
+      btn.onclick = () => {
+        const distId = btn.dataset.distId;
+        let dist = null;
+        ordersList.some(o => (o.items || o.order_items || o.OrderItems || []).some(it => {
+          if (it.distribution && String(it.distribution.id) === distId) { dist = it.distribution; return true; }
+          return false;
+        }));
+        if (!dist) return;
+        distributionPaymentModal({ ...dist, store_name: btn.dataset.storeName, product_name: btn.dataset.productName }, () => loadData(true));
+      };
+    });
+
     // "Ro'yxatda bo'lmagan do'kon" tugmasi handler
     const extDeliveryBtn = content.querySelector('#open-ext-delivery-btn');
     if (extDeliveryBtn) {
@@ -3215,6 +3293,11 @@ async function renderDeliveryDashboard(content, currentTab = 'active') {
                       <span class="chip-cash" title="Naqd summa"><i class="fa-solid fa-money-bill-wave"></i> Naqd: <strong>${fmtMoney(stats.cashAmount || 0)}</strong></span>
                       <span class="chip-credit" title="Nasiya summa"><i class="fa-solid fa-file-invoice-dollar"></i> Nasiya: <strong>${fmtMoney(stats.creditAmount != null ? stats.creditAmount : Math.max(0, (stats.delivered || stats.ordered) * unitPrice - (stats.cashAmount || 0)))}</strong></span>
                       <span class="chip-total" title="Jami summa"><i class="fa-solid fa-calculator"></i> Jami: <strong>${fmtMoney((stats.delivered || stats.ordered) * unitPrice)}</strong></span>
+                      ${item.distribution?.id && canEditDistributionPayment(item.distribution) ? `
+                        <button type="button" class="btn btn-secondary btn-sm delivery-edit-pay-btn" data-dist-id="${item.distribution.id}" data-store-name="${escapeHtml(storeName)}" data-product-name="${escapeHtml(prodName)}">
+                          <i class="fa-solid fa-pen"></i> Tahrirlash
+                        </button>
+                      ` : ''}
                     </div>
                   </div>
                 ` : `
@@ -4820,3 +4903,162 @@ function addStoreToDriverModal(driverItem = null, businesses = [], allDriverData
       }, '<i class="fa-solid fa-spinner fa-spin"></i> Biriktirilmoqda...');
     };
   })}
+
+/* ===================== FOYDALANUVCHILAR (faqat super_admin) ===================== */
+const USER_ROLE_LABELS = {
+  super_admin: 'Katta admin',
+  bakery_admin: 'Nonvoyxona admini',
+  store: "Do'kon admini",
+  delivery: 'Haydovchi',
+  dostavkachi: 'Haydovchi'
+};
+
+async function renderUsers(content) {
+  if (state.user?.role !== 'super_admin') {
+    location.hash = '#/dashboard';
+    return;
+  }
+  let page = 1;
+  const limit = 20;
+  let search = '';
+
+  async function loadData() {
+    try {
+      const res = await API.get('/users' + qs({ page, limit }), { bypassCache: true });
+      const { items, pagination } = extractListData(res, page, limit);
+      const q = search.trim().toLowerCase();
+      const users = q
+        ? items.filter(u => [u.username, u.full_name, u.business_name, USER_ROLE_LABELS[u.role]].some(v => String(v || '').toLowerCase().includes(q)))
+        : items;
+
+      content.innerHTML = `
+        <div class="section-head">
+          <h2>Foydalanuvchilar</h2>
+          <p>Barcha rollardagi foydalanuvchilar parolini shu yerdan yangilashingiz mumkin</p>
+        </div>
+
+        <div class="filters-bar">
+          <div class="field"><label>Qidiruv</label><input type="text" id="users-search" placeholder="Login, ism yoki nonvoyxona..." value="${escapeHtml(search)}" /></div>
+          <div style="margin-left:auto;">
+            <button class="btn btn-secondary" id="change-own-pwd-btn"><i class="fa-solid fa-key"></i> Mening parolim</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Ro'yxat (${fmtNum(pagination.total)})</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Login</th><th>To'liq ism</th><th>Rol</th><th>Nonvoyxona</th><th>Holati</th><th></th></tr></thead>
+            <tbody>
+              ${users.length ? users.map(u => {
+                const isSelf = String(u.id) === String(state.user.id);
+                const isActive = u.active !== 0 && u.active !== false;
+                return `
+                  <tr>
+                    <td><strong>${escapeHtml(u.username)}</strong>${isSelf ? ' <span class="badge badge-blue">siz</span>' : ''}</td>
+                    <td>${escapeHtml(u.full_name || '—')}</td>
+                    <td><span class="badge badge-gray">${escapeHtml(USER_ROLE_LABELS[u.role] || u.role)}</span></td>
+                    <td class="muted">${escapeHtml(u.business_name || '—')}</td>
+                    <td>${isActive ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-gray">Nofaol</span>'}</td>
+                    <td><button class="btn btn-secondary btn-sm" data-pwd="${u.id}"><i class="fa-solid fa-key"></i> Parolni yangilash</button></td>
+                  </tr>
+                `;
+              }).join('') : `<tr class="empty-row"><td colspan="6">Foydalanuvchi topilmadi</td></tr>`}
+            </tbody>
+          </table></div>
+          ${renderPaginationHtml(pagination, 'users-pg')}
+        </div>
+      `;
+
+      bindPaginationEvents(content, pagination, (newPage) => {
+        page = newPage;
+        loadData();
+      }, 'users-pg');
+
+      const searchInp = content.querySelector('#users-search');
+      searchInp.oninput = (e) => {
+        search = e.target.value;
+        clearTimeout(searchInp._t);
+        searchInp._t = setTimeout(async () => {
+          await loadData();
+          const inp = content.querySelector('#users-search');
+          if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+        }, 250);
+      };
+
+      content.querySelector('#change-own-pwd-btn').onclick = () => userPasswordModal(state.user);
+      content.querySelectorAll('[data-pwd]').forEach(b => b.onclick = () => {
+        const user = items.find(u => String(u.id) === b.dataset.pwd);
+        if (user) userPasswordModal(user);
+      });
+    } catch (err) {
+      content.innerHTML = `
+        <div class="alert alert-warning" style="margin-top:20px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> Foydalanuvchilarni yuklashda xatolik: ${escapeHtml(err.message || 'Server xatosi')}
+        </div>
+      `;
+    }
+  }
+
+  await loadData();
+}
+
+function userPasswordModal(user) {
+  const isSelf = String(user.id) === String(state.user?.id);
+  openModal(`Parolni yangilash — ${escapeHtml(user.full_name || user.username)}`, `
+    <form id="user-pwd-form">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label>Login</label>
+          <input disabled value="${escapeHtml(user.username)}${isSelf ? ' (siz)' : ''}" />
+        </div>
+        <div class="field span-2">
+          <label>Yangi parol *</label>
+          <div class="password-input-wrap">
+            <input required type="password" id="f-new-password" minlength="6" placeholder="Kamida 6 ta belgi" autocomplete="new-password" />
+            <button type="button" class="password-toggle-btn" id="f-new-password-toggle" title="Parolni ko'rsatish/yashirish" tabindex="-1">
+              <i class="fa-regular fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div class="field span-2">
+          <label>Yangi parolni takrorlang *</label>
+          <input required type="password" id="f-new-password-2" minlength="6" placeholder="Parolni qayta kiriting" autocomplete="new-password" />
+        </div>
+      </div>
+      <div class="form-actions" style="margin-top:20px;">
+        <button type="button" class="btn btn-secondary" id="user-pwd-cancel">Bekor qilish</button>
+        <button type="submit" class="btn btn-primary" id="user-pwd-save"><i class="fa-solid fa-check"></i> Saqlash</button>
+      </div>
+    </form>
+  `, (m) => {
+    const pwdInput = m.querySelector('#f-new-password');
+    const pwdInput2 = m.querySelector('#f-new-password-2');
+    const toggle = m.querySelector('#f-new-password-toggle');
+    const submitBtn = m.querySelector('#user-pwd-save');
+    m.querySelector('#user-pwd-cancel').onclick = () => m.remove();
+    toggle.onclick = () => {
+      const isPwd = pwdInput.type === 'password';
+      pwdInput.type = isPwd ? 'text' : 'password';
+      pwdInput2.type = pwdInput.type;
+      toggle.innerHTML = isPwd ? '<i class="fa-regular fa-eye-slash"></i>' : '<i class="fa-regular fa-eye"></i>';
+    };
+
+    m.querySelector('#user-pwd-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const password = pwdInput.value;
+      if (password.length < 6) {
+        toast("Parol kamida 6 belgidan iborat bo'lishi kerak", 'warning');
+        return;
+      }
+      if (password !== pwdInput2.value) {
+        toast('Parollar mos kelmadi', 'warning');
+        return;
+      }
+      await withButtonLoading(submitBtn, async () => {
+        await API.put('/users/' + user.id, { password });
+        m.remove();
+        toast(isSelf ? "Parolingiz yangilandi" : "Parol yangilandi", 'success');
+      }, '<i class="fa-solid fa-spinner fa-spin"></i> Saqlanmoqda...');
+    };
+  });
+}

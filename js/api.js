@@ -337,6 +337,8 @@ const API = {
       ApiCache.invalidate('/reports');
       ApiCache.invalidate('/payments');
       ApiCache.invalidate('/stores');
+      ApiCache.invalidate('/deliveries');
+      ApiCache.invalidate('/orders');
     } else if (url.includes('/payments')) {
       ApiCache.invalidate('/payments');
       ApiCache.invalidate('/stores');
