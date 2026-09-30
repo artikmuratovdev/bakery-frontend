@@ -424,6 +424,7 @@ const NAV_ITEMS = {
       { href: '#/products', label: 'Mahsulotlar', icon: '<i class="fa-solid fa-bread-slice"></i>' },
       { href: '#/stores', label: "Do‘konlar", icon: '<i class="fa-solid fa-store"></i>' },
       { href: '#/drivers', label: 'Haydovchilar', icon: '<i class="fa-solid fa-id-card"></i>' },
+      { href: '#/users', label: 'Foydalanuvchilar', icon: '<i class="fa-solid fa-users-gear"></i>' },
     ]},
     { group: 'Amaliyot', items: [
       { href: '#/orders', label: 'Do‘kon zakazlari', icon: '<i class="fa-solid fa-clipboard-check"></i>' },
@@ -536,6 +537,11 @@ async function render(isRevalidating = false) {
     return;
   }
 
+  if (view === 'users' && state.user?.role !== 'super_admin') {
+    location.hash = '#/dashboard';
+    return;
+  }
+
   if (view === 'drivers' && state.user?.role !== 'super_admin' && state.user?.role !== 'bakery_admin') {
     location.hash = '#/dashboard';
     return;
@@ -545,6 +551,7 @@ async function render(isRevalidating = false) {
     dashboard: isDeliveryUser() ? 'Yetkazib berish paneli' : 'Boshqaruv paneli',
     delivery: 'Yetkazilgan zakazlar',
     drivers: 'Haydovchilar boshqaruvi',
+    users: 'Foydalanuvchilar',
     businesses: 'Nonvoyxonalar',
     products: 'Mahsulotlar',
     stores: "Do‘konlar",
@@ -563,6 +570,7 @@ async function render(isRevalidating = false) {
     else if (view === 'delivery' && param === 'external') await renderDeliveryDashboard(content, 'external');
     else if (view === 'delivery') await renderDeliveryDashboard(content, 'active');
     else if (view === 'drivers') await renderDrivers(content);
+    else if (view === 'users') await renderUsers(content);
     else if (view === 'businesses') await renderBusinesses(content);
     else if (view === 'products') await renderProducts(content);
     else if (view === 'stores' && !param) await renderStores(content);
