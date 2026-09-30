@@ -4940,7 +4940,7 @@ async function renderUsers(content) {
         <div class="filters-bar">
           <div class="field"><label>Qidiruv</label><input type="text" id="users-search" placeholder="Login, ism yoki nonvoyxona..." value="${escapeHtml(search)}" /></div>
           <div style="margin-left:auto;">
-            <button class="btn btn-secondary" id="change-own-pwd-btn"><i class="fa-solid fa-key"></i> Mening parolim</button>
+            <button class="btn btn-secondary" id="change-own-key-btn"><i class="fa-solid fa-key"></i> Mening parolim</button>
           </div>
         </div>
 
@@ -4959,7 +4959,7 @@ async function renderUsers(content) {
                     <td><span class="badge badge-gray">${escapeHtml(USER_ROLE_LABELS[u.role] || u.role)}</span></td>
                     <td class="muted">${escapeHtml(u.business_name || '—')}</td>
                     <td>${isActive ? '<span class="badge badge-green">Faol</span>' : '<span class="badge badge-gray">Nofaol</span>'}</td>
-                    <td><button class="btn btn-secondary btn-sm" data-pwd="${u.id}"><i class="fa-solid fa-key"></i> Parolni yangilash</button></td>
+                    <td><button class="btn btn-secondary btn-sm" data-reset-key="${u.id}"><i class="fa-solid fa-key"></i> Parolni yangilash</button></td>
                   </tr>
                 `;
               }).join('') : `<tr class="empty-row"><td colspan="6">Foydalanuvchi topilmadi</td></tr>`}
@@ -4985,9 +4985,9 @@ async function renderUsers(content) {
         }, 250);
       };
 
-      content.querySelector('#change-own-pwd-btn').onclick = () => userPasswordModal(state.user);
-      content.querySelectorAll('[data-pwd]').forEach(b => b.onclick = () => {
-        const user = items.find(u => String(u.id) === b.dataset.pwd);
+      content.querySelector('#change-own-key-btn').onclick = () => userPasswordModal(state.user);
+      content.querySelectorAll('[data-reset-key]').forEach(b => b.onclick = () => {
+        const user = items.find(u => String(u.id) === b.dataset.resetKey);
         if (user) userPasswordModal(user);
       });
     } catch (err) {
@@ -5005,7 +5005,7 @@ async function renderUsers(content) {
 function userPasswordModal(user) {
   const isSelf = String(user.id) === String(state.user?.id);
   openModal(`Parolni yangilash — ${escapeHtml(user.full_name || user.username)}`, `
-    <form id="user-pwd-form">
+    <form id="user-key-form">
       <div class="form-grid">
         <div class="field span-2">
           <label>Login</label>
@@ -5026,16 +5026,16 @@ function userPasswordModal(user) {
         </div>
       </div>
       <div class="form-actions" style="margin-top:20px;">
-        <button type="button" class="btn btn-secondary" id="user-pwd-cancel">Bekor qilish</button>
-        <button type="submit" class="btn btn-primary" id="user-pwd-save"><i class="fa-solid fa-check"></i> Saqlash</button>
+        <button type="button" class="btn btn-secondary" id="user-key-cancel">Bekor qilish</button>
+        <button type="submit" class="btn btn-primary" id="user-key-save"><i class="fa-solid fa-check"></i> Saqlash</button>
       </div>
     </form>
   `, (m) => {
     const pwdInput = m.querySelector('#f-new-password');
     const pwdInput2 = m.querySelector('#f-new-password-2');
     const toggle = m.querySelector('#f-new-password-toggle');
-    const submitBtn = m.querySelector('#user-pwd-save');
-    m.querySelector('#user-pwd-cancel').onclick = () => m.remove();
+    const submitBtn = m.querySelector('#user-key-save');
+    m.querySelector('#user-key-cancel').onclick = () => m.remove();
     toggle.onclick = () => {
       const isPwd = pwdInput.type === 'password';
       pwdInput.type = isPwd ? 'text' : 'password';
@@ -5043,7 +5043,7 @@ function userPasswordModal(user) {
       toggle.innerHTML = isPwd ? '<i class="fa-regular fa-eye-slash"></i>' : '<i class="fa-regular fa-eye"></i>';
     };
 
-    m.querySelector('#user-pwd-form').onsubmit = async (e) => {
+    m.querySelector('#user-key-form').onsubmit = async (e) => {
       e.preventDefault();
       const password = pwdInput.value;
       if (password.length < 6) {
